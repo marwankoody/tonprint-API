@@ -22,8 +22,12 @@ if (env.NODE_ENV === 'production') {
   app.set('trust proxy', 1)
 }
 
-// Sécurité
-app.use(helmet())
+// Sécurité — CORP en cross-origin : l'API est appelée depuis www.tonprint.ma
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  })
+)
 app.use(
   cors({
     origin(origin, callback) {
