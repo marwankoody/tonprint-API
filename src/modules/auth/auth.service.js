@@ -20,6 +20,7 @@ function sanitizeUser(user) {
     id: user._id.toString(),
     name: user.name,
     email: user.email,
+    phone: user.phone || '',
     roles: user.roles,
     pointsBalance: user.pointsBalance,
     createdAt: user.createdAt,
@@ -131,4 +132,51 @@ export async function getMe(userId) {
   }
 
   return sanitizeUser(user)
+}
+
+/**
+ * @param {string} userId
+ * @param {{ name: string, email: string, phone?: string }} input
+ */
+export async function updateProfile(userId, { name, email, phone = '' }) {
+  const emailTaken = await User.exists({ email, _id: { $ne: userId } })
+  if (emailTaken) {
+    throw new AppError('An account with this email already exists', 409, 'EMAIL_TAKEN')
+  }
+
+  const user = await User.findByIdAndUpdate(
+    userId,
+    { $set: { name, email, phone } },
+    { returnDocument: 'after', runValidators: true }
+  ).lean()
+
+  if (!user) {
+    throw new AppError('User not found', 404, 'USER_NOT_FOUND')
+  }
+
+  return sanitizeUser(user)
+}
+
+/**
+ * @param {string} userId
+ * @param {{ currentPassword: string, newPassword: string }} input
+ */
+export async function changePassword(userId, { currentPassword, newPassword }) {
+  const user = await User.findById(userId).select('+password')
+
+  if (!user) {
+    throw new AppError('User not found', 404, 'USER_NOT_FOUND')
+  }
+
+  const matches = await bcrypt.compare(currentPassword, user.password)
+  if (!matches) {
+    throw new AppError('Current password is incorrect', 400, 'INVALID_CURRENT_PASSWORD')
+  }
+
+  user.password = await bcrypt.hash(newPassword, PASSWORD_SALT_ROUNDS)
+  // Force re-login elsewhere: revoke refresh sessions after password change.
+  user.refreshTokenHash = null
+  await user.save()
+
+  return true
 }

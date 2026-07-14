@@ -37,6 +37,7 @@ function formatOrder(order, userId) {
     })),
     totalPrice: order.totalPrice,
     status: order.status,
+    channel: order.channel || 'marketplace',
     deliveryAddress: order.deliveryAddress,
     paymentMethod: order.paymentMethod,
     cancelledAt: order.cancelledAt,
@@ -86,7 +87,7 @@ function formatOrderAdmin(order) {
 function resolveUnitPrice(product, quantity, variant) {
   const hasWholesale =
     product.wholesalePrice != null &&
-    product.wholesalePrice >= 0 &&
+    product.wholesalePrice > 0 &&
     quantity >= (product.wholesaleMoq || 30)
 
   if (hasWholesale) return product.wholesalePrice
@@ -165,6 +166,7 @@ export async function createOrder(userId, payload) {
   const products = await Product.find({
     _id: { $in: productIds },
     isPublished: true,
+    $or: [{ channel: 'marketplace' }, { channel: { $exists: false } }],
   }).lean()
 
   const productMap = new Map(products.map((p) => [p._id.toString(), p]))
@@ -233,6 +235,7 @@ export async function createOrder(userId, payload) {
       items: orderItems,
       totalPrice,
       status: 'pending_delivery',
+      channel: 'marketplace',
       deliveryAddress,
       paymentMethod: 'cod',
       statusHistory: [
@@ -262,6 +265,12 @@ export async function listMyOrders(userId, query) {
 
   if (query.status) filter.status = query.status
 
+  if (query.channel === 'personalization') {
+    filter.channel = 'personalization'
+  } else if (query.channel === 'marketplace') {
+    filter.$or = [{ channel: 'marketplace' }, { channel: { $exists: false } }]
+  }
+
   const [orders, total] = await Promise.all([
     Order.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
     Order.countDocuments(filter),
@@ -274,14 +283,21 @@ export async function listMyOrders(userId, query) {
 }
 
 /**
- * Liste admin — toutes les commandes, filtres status / recherche / dates.
+ * Liste admin — toutes les commandes, filtres status / canal / recherche / dates.
  * @param {object} query
  */
 export async function listOrdersAdmin(query) {
   const { page, limit, skip } = parsePagination(query, { maxLimit: 50, defaultLimit: 20 })
   const filter = {}
+  const and = []
 
   if (query.status) filter.status = query.status
+
+  if (query.channel === 'personalization') {
+    and.push({ channel: 'personalization' })
+  } else if (query.channel === 'marketplace') {
+    and.push({ $or: [{ channel: 'marketplace' }, { channel: { $exists: false } }] })
+  }
 
   if (query.dateFrom || query.dateTo) {
     filter.createdAt = {}
@@ -314,7 +330,13 @@ export async function listOrdersAdmin(query) {
       or.push({ user: { $in: matchingUsers.map((u) => u._id) } })
     }
 
-    filter.$or = or
+    and.push({ $or: or })
+  }
+
+  if (and.length === 1) {
+    Object.assign(filter, and[0])
+  } else if (and.length > 1) {
+    filter.$and = and
   }
 
   const [orders, total] = await Promise.all([

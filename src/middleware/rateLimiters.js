@@ -32,3 +32,13 @@ export const refreshLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 100,
 })
+
+/**
+ * Limiteur global appliqué à toute l'API (garde-fou anti-abus/DoS).
+ * Les endpoints sensibles (auth) ont en plus leurs propres limiteurs, plus stricts.
+ */
+export const apiLimiter = rateLimit({
+  ...commonOptions,
+  windowMs: 15 * 60 * 1000,
+  limit: 300,
+})

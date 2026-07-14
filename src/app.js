@@ -7,6 +7,8 @@ import cookieParser from 'cookie-parser'
 import { corsOrigins, env } from './config/env.js'
 import { notFound } from './middleware/notFound.js'
 import { errorHandler } from './middleware/errorHandler.js'
+import { apiLimiter } from './middleware/rateLimiters.js'
+import { AppError } from './utils/AppError.js'
 import healthRoutes from './modules/health/health.routes.js'
 import authRoutes from './modules/auth/auth.routes.js'
 import productsRoutes from './modules/products/product.routes.js'
@@ -35,7 +37,7 @@ app.use(
       if (!origin || corsOrigins.includes(origin)) {
         return callback(null, true)
       }
-      return callback(new Error(`CORS blocked for origin: ${origin}`))
+      return callback(new AppError(`CORS blocked for origin: ${origin}`, 403, 'CORS_BLOCKED'))
     },
     credentials: true,
   })
@@ -53,6 +55,10 @@ app.use(compression())
 if (env.NODE_ENV !== 'test') {
   app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev'))
 }
+
+// Garde-fou anti-abus/DoS global — les endpoints sensibles ont leurs propres
+// limiteurs plus stricts (voir rateLimiters.js), appliqués en plus de celui-ci.
+app.use('/api', apiLimiter)
 
 // Routes API
 app.use('/api/health', healthRoutes)

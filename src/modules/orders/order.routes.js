@@ -60,12 +60,4 @@ router.delete(
   orderController.cancelOrder
 )
 
-router.patch(
-  '/:id/status',
-  requireRole('admin'),
-  validate(orderIdParamSchema, 'params'),
-  validate(updateOrderStatusSchema),
-  orderController.updateOrderStatus
-)
-
 export default router

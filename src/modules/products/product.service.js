@@ -2,7 +2,8 @@ import mongoose from 'mongoose'
 import { Product } from './product.model.js'
 import { AppError } from '../../utils/AppError.js'
 import { parsePagination, paginationMeta } from '../../utils/pagination.js'
-import { uploadProductImage, deleteProductImages } from '../../lib/cloudinaryUpload.js'
+import { uploadProductImage, deleteCloudinaryImages } from '../../lib/cloudinaryUpload.js'
+import { sanitizeRichHtml } from '../../utils/sanitizeHtml.js'
 
 /**
  * @param {import('mongoose').Document | object} product
@@ -12,6 +13,7 @@ function formatProduct(product) {
     id: product._id.toString(),
     name: product.name,
     category: product.category,
+    channel: product.channel || 'marketplace',
     description: product.description,
     printType: product.printType || '',
     variants: product.variants,
@@ -31,6 +33,18 @@ function formatProduct(product) {
   }
 }
 
+/** Filtre canal : docs sans `channel` = marketplace (rétrocompat). */
+function channelFilter(channel = 'marketplace') {
+  if (channel === 'personalization') {
+    return { channel: 'personalization' }
+  }
+  return { $or: [{ channel: 'marketplace' }, { channel: { $exists: false } }] }
+}
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 const SORT_MAP = {
   price_asc: { price: 1 },
   price_desc: { price: -1 },
@@ -43,11 +57,15 @@ const SORT_MAP = {
  */
 export async function listProducts(query) {
   const { page, limit, skip } = parsePagination(query, { maxLimit: 20, defaultLimit: 12 })
-  const { category, minPrice, maxPrice, sort = 'newest' } = query
+  const { category, minPrice, maxPrice, sort = 'newest', channel = 'marketplace', search } = query
 
-  const filter = { isPublished: true }
+  const filter = {
+    isPublished: true,
+    ...channelFilter(channel),
+  }
 
   if (category) filter.category = category
+  if (search) filter.name = { $regex: escapeRegex(search), $options: 'i' }
   if (minPrice !== undefined || maxPrice !== undefined) {
     filter.price = {}
     if (minPrice !== undefined) filter.price.$gte = minPrice
@@ -67,13 +85,19 @@ export async function listProducts(query) {
 
 /**
  * @param {string} id
+ * @param {{ channel?: string }} [options]
  */
-export async function getProductById(id) {
+export async function getProductById(id, options = {}) {
   if (!mongoose.isValidObjectId(id)) {
     throw new AppError('Invalid product id', 400, 'INVALID_ID')
   }
 
-  const product = await Product.findOne({ _id: id, isPublished: true }).lean()
+  const channel = options.channel || 'marketplace'
+  const product = await Product.findOne({
+    _id: id,
+    isPublished: true,
+    ...channelFilter(channel),
+  }).lean()
 
   if (!product) {
     throw new AppError('Product not found', 404, 'PRODUCT_NOT_FOUND')
@@ -82,21 +106,17 @@ export async function getProductById(id) {
   return formatProduct(product)
 }
 
-/** Échappe les caractères spéciaux regex (recherche texte admin sans injection). */
-function escapeRegex(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
 /**
  * Liste catalogue admin — inclut les brouillons (isPublished: false), filtres larges.
  * @param {import('express').Request['query']} query
  */
 export async function listProductsAdmin(query) {
   const { page, limit, skip } = parsePagination(query, { maxLimit: 50, defaultLimit: 20 })
-  const { search, category, isPublished } = query
+  const { search, category, isPublished, channel } = query
 
   const filter = {}
   if (category) filter.category = category
+  if (channel) Object.assign(filter, channelFilter(channel))
   if (isPublished !== undefined) filter.isPublished = isPublished
   if (search) filter.name = { $regex: escapeRegex(search), $options: 'i' }
 
@@ -157,7 +177,11 @@ export async function createProduct(data, files = []) {
     throw new AppError('At least one product image is required', 400, 'IMAGES_REQUIRED')
   }
 
-  const product = await Product.create({ ...data, images })
+  const product = await Product.create({
+    ...data,
+    description: sanitizeRichHtml(data.description || ''),
+    images,
+  })
   return formatProduct(product)
 }
 
@@ -185,7 +209,7 @@ export async function updateProduct(id, data, files = []) {
       .map((img) => img.publicId)
 
     if (removedPublicIds.length) {
-      await deleteProductImages(removedPublicIds)
+      await deleteCloudinaryImages(removedPublicIds)
       product.images = product.images.filter((img) => !toRemove.has(img.publicId))
     }
   }
@@ -197,6 +221,10 @@ export async function updateProduct(id, data, files = []) {
 
   if (product.images.length && !product.images.some((img) => img.isPrimary)) {
     product.images[0].isPrimary = true
+  }
+
+  if (fields.description !== undefined) {
+    fields.description = sanitizeRichHtml(fields.description)
   }
 
   Object.assign(product, fields)
@@ -221,7 +249,7 @@ export async function deleteProduct(id) {
 
   const publicIds = product.images.map((img) => img.publicId)
   if (publicIds.length) {
-    await deleteProductImages(publicIds)
+    await deleteCloudinaryImages(publicIds)
   }
 
   product.isPublished = false

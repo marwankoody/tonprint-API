@@ -17,21 +17,25 @@ export const listOrdersAdmin = asyncHandler(async (req, res) => {
 })
 
 export const getOrderAdmin = asyncHandler(async (req, res) => {
-  const order = await orderService.getOrderAdmin(req.params.id)
+  const { id } = req.validatedParams ?? req.params
+  const order = await orderService.getOrderAdmin(id)
   res.status(200).json({ success: true, data: { order } })
 })
 
 export const getOrder = asyncHandler(async (req, res) => {
-  const order = await orderService.getOrderById(req.params.id, req.user)
+  const { id } = req.validatedParams ?? req.params
+  const order = await orderService.getOrderById(id, req.user)
   res.status(200).json({ success: true, data: { order } })
 })
 
 export const cancelOrder = asyncHandler(async (req, res) => {
-  const order = await orderService.cancelOrder(req.params.id, req.user.id)
+  const { id } = req.validatedParams ?? req.params
+  const order = await orderService.cancelOrder(id, req.user.id)
   res.status(200).json({ success: true, data: { order } })
 })
 
 export const updateOrderStatus = asyncHandler(async (req, res) => {
-  const order = await orderService.updateOrderStatus(req.params.id, req.body.status, req.user.id)
+  const { id } = req.validatedParams ?? req.params
+  const order = await orderService.updateOrderStatus(id, req.body.status, req.user.id)
   res.status(200).json({ success: true, data: { order } })
 })

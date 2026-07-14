@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { ORDER_STATUSES } from './order.model.js'
+import { ORDER_STATUSES, ORDER_CHANNELS } from './order.model.js'
 
 /** Téléphone marocain : 0XXXXXXXXX, +212XXXXXXXXX, 00212… */
 const moroccoPhoneRegex = /^(?:\+212|00212|0)[5-7]\d{8}$/
@@ -44,6 +44,10 @@ export const listOrdersQuerySchema = z.object({
     .string()
     .refine((val) => ORDER_STATUSES.includes(val), { message: 'Invalid status' })
     .optional(),
+  channel: z
+    .string()
+    .refine((val) => ORDER_CHANNELS.includes(val), { message: 'Invalid channel' })
+    .optional(),
 })
 
 /** Liste admin — toutes les commandes + filtres. */
@@ -53,6 +57,10 @@ export const adminListOrdersQuerySchema = z.object({
   status: z
     .string()
     .refine((val) => ORDER_STATUSES.includes(val), { message: 'Invalid status' })
+    .optional(),
+  channel: z
+    .string()
+    .refine((val) => ORDER_CHANNELS.includes(val), { message: 'Invalid channel' })
     .optional(),
   q: z.string().trim().max(100).optional(),
   dateFrom: z.coerce.date().optional(),

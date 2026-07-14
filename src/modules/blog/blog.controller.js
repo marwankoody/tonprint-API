@@ -8,8 +8,9 @@ export const listPosts = asyncHandler(async (req, res) => {
 })
 
 export const getPostBySlug = asyncHandler(async (req, res) => {
+  const { slug } = req.validatedParams ?? req.params
   const locale = req.validatedQuery?.locale ?? req.query.locale ?? 'fr'
-  const post = await blogService.getPublishedPostBySlug(req.params.slug, locale)
+  const post = await blogService.getPublishedPostBySlug(slug, locale)
   res.status(200).json({ success: true, data: { post } })
 })
 
@@ -19,7 +20,8 @@ export const listPostsAdmin = asyncHandler(async (req, res) => {
 })
 
 export const getPostAdmin = asyncHandler(async (req, res) => {
-  const post = await blogService.getPostAdmin(req.params.id)
+  const { id } = req.validatedParams ?? req.params
+  const post = await blogService.getPostAdmin(id)
   res.status(200).json({ success: true, data: { post } })
 })
 
@@ -29,12 +31,14 @@ export const createPost = asyncHandler(async (req, res) => {
 })
 
 export const updatePost = asyncHandler(async (req, res) => {
-  const post = await blogService.updatePost(req.params.id, req.body, req.file)
+  const { id } = req.validatedParams ?? req.params
+  const post = await blogService.updatePost(id, req.body, req.file)
   res.status(200).json({ success: true, data: { post } })
 })
 
 export const deletePost = asyncHandler(async (req, res) => {
-  const result = await blogService.deletePost(req.params.id)
+  const { id } = req.validatedParams ?? req.params
+  const result = await blogService.deletePost(id)
   res.status(200).json({ success: true, data: result })
 })
 

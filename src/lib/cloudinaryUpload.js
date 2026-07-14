@@ -85,11 +85,6 @@ export async function deleteCloudinaryImages(publicIds) {
   )
 }
 
-/** @deprecated Prefer deleteCloudinaryImages */
-export async function deleteProductImages(publicIds) {
-  return deleteCloudinaryImages(publicIds)
-}
-
 /**
  * Construit une URL Cloudinary optimisée pour l'affichage catalogue/fiche.
  * @param {string} publicId

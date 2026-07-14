@@ -11,6 +11,13 @@ export const ORDER_STATUSES = Object.freeze([
   'cancelled',
 ])
 
+/**
+ * Canal de la commande (snapshot à la création) :
+ * - marketplace → produits boutique
+ * - personalization → produits personnalisés (espace créateur)
+ */
+export const ORDER_CHANNELS = Object.freeze(['marketplace', 'personalization'])
+
 /** Transitions de statut autorisées (admin). */
 export const ORDER_STATUS_TRANSITIONS = Object.freeze({
   pending_delivery: ['processing', 'cancelled'],
@@ -100,6 +107,12 @@ const orderSchema = new Schema(
       default: 'pending_delivery',
       index: true,
     },
+    channel: {
+      type: String,
+      enum: ORDER_CHANNELS,
+      default: 'marketplace',
+      index: true,
+    },
     deliveryAddress: {
       type: deliveryAddressSchema,
       required: true,
@@ -122,6 +135,7 @@ const orderSchema = new Schema(
 )
 
 orderSchema.index({ user: 1, createdAt: -1 })
+orderSchema.index({ user: 1, channel: 1, createdAt: -1 })
 orderSchema.index({ createdAt: -1 })
 orderSchema.index({ status: 1, createdAt: -1 })
 

@@ -9,8 +9,15 @@ export const PRODUCT_CATEGORIES = [
   'caps',
   'tote-bags',
   'mugs',
-  'uniforms'
+  'uniforms',
 ]
+
+/**
+ * Canal de distribution :
+ * - `marketplace` → boutique publique `/marketplace`
+ * - `personalization` → catalogue créateur `/creator/catalog`
+ */
+export const PRODUCT_CHANNELS = ['marketplace', 'personalization']
 
 const measurementsSchema = new Schema(
   {
@@ -62,6 +69,13 @@ const productSchema = new Schema(
       type: String,
       required: [true, 'Category is required'],
       enum: PRODUCT_CATEGORIES,
+      index: true,
+    },
+    channel: {
+      type: String,
+      required: [true, 'Channel is required'],
+      enum: PRODUCT_CHANNELS,
+      default: 'marketplace',
       index: true,
     },
     /** HTML riche (éditeur Lexical côté admin). */
@@ -141,6 +155,7 @@ const productSchema = new Schema(
   { timestamps: true }
 )
 
+productSchema.index({ isPublished: 1, channel: 1, category: 1 })
 productSchema.index({ isPublished: 1, category: 1 })
 productSchema.index({ isPublished: 1, price: 1 })
 productSchema.index({ isPublished: 1, popularity: -1 })

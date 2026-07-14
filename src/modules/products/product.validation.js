@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { PRODUCT_CATEGORIES } from './product.model.js'
+import { PRODUCT_CATEGORIES, PRODUCT_CHANNELS } from './product.model.js'
 
 const coerceBool = z.preprocess((val) => {
   if (val === 'true' || val === true) return true
@@ -31,6 +31,10 @@ const colorSchema = z.object({
     .regex(/^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/, 'Invalid color hex'),
 })
 
+const channelSchema = z
+  .string()
+  .refine((val) => PRODUCT_CHANNELS.includes(val), { message: 'Invalid channel' })
+
 export const listProductsQuerySchema = z.object({
   page: z.coerce.number().int().positive().optional(),
   limit: z.coerce.number().int().positive().optional(),
@@ -38,6 +42,8 @@ export const listProductsQuerySchema = z.object({
     .string()
     .refine((val) => PRODUCT_CATEGORIES.includes(val), { message: 'Invalid category' })
     .optional(),
+  channel: channelSchema.optional().default('marketplace'),
+  search: z.string().trim().max(120).optional(),
   minPrice: z.coerce.number().min(0).optional(),
   maxPrice: z.coerce.number().min(0).optional(),
   sort: z.enum(['price_asc', 'price_desc', 'popularity', 'newest']).optional().default('newest'),
@@ -52,6 +58,7 @@ export const adminListProductsQuerySchema = z.object({
     .string()
     .refine((val) => PRODUCT_CATEGORIES.includes(val), { message: 'Invalid category' })
     .optional(),
+  channel: channelSchema.optional(),
   isPublished: coerceBool.optional(),
 })
 
@@ -60,6 +67,7 @@ export const createProductSchema = z.object({
   category: z
     .string()
     .refine((val) => PRODUCT_CATEGORIES.includes(val), { message: 'Invalid category' }),
+  channel: channelSchema.default('marketplace'),
   description: z.string().trim().max(20000).optional().default(''),
   printType: z.string().trim().max(60).optional().default(''),
   price: z.coerce.number().min(0, 'Price must be >= 0'),
