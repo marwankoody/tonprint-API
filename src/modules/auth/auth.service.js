@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs'
-import { User } from './user.model.js'
+import { User, normalizeRoles } from './user.model.js'
 import { AppError } from '../../utils/AppError.js'
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../../utils/jwt.js'
 
@@ -21,8 +21,9 @@ function sanitizeUser(user) {
     name: user.name,
     email: user.email,
     phone: user.phone || '',
-    roles: user.roles,
+    roles: normalizeRoles(user.roles),
     pointsBalance: user.pointsBalance,
+    isActive: user.isActive !== false,
     createdAt: user.createdAt,
   }
 }
@@ -33,12 +34,14 @@ function sanitizeUser(user) {
  * @param {{ _id: import('mongoose').Types.ObjectId, roles: string[] }} user
  */
 async function issueTokenPair(user) {
-  const identity = { id: user._id.toString(), roles: user.roles }
+  const roles = normalizeRoles(user.roles)
+  const identity = { id: user._id.toString(), roles }
   const accessToken = signAccessToken(identity)
   const refreshToken = signRefreshToken(identity)
 
   const refreshTokenHash = await bcrypt.hash(refreshToken, REFRESH_TOKEN_SALT_ROUNDS)
-  await User.updateOne({ _id: user._id }, { refreshTokenHash })
+  // Persiste aussi la normalisation des rôles (admin | client uniquement).
+  await User.updateOne({ _id: user._id }, { refreshTokenHash, roles })
 
   return { accessToken, refreshToken }
 }
@@ -73,6 +76,10 @@ export async function login({ email, password }) {
     throw new AppError('Invalid email or password', 401, 'INVALID_CREDENTIALS')
   }
 
+  if (user.isActive === false) {
+    throw new AppError('This account has been disabled', 401, 'ACCOUNT_DISABLED')
+  }
+
   const tokens = await issueTokenPair(user)
   return { user: sanitizeUser(user), ...tokens }
 }
@@ -98,6 +105,11 @@ export async function refresh(refreshToken) {
 
   if (!user || !user.refreshTokenHash) {
     throw new AppError('Session expired, please log in again', 401, 'SESSION_REVOKED')
+  }
+
+  if (user.isActive === false) {
+    await User.updateOne({ _id: user._id }, { refreshTokenHash: null })
+    throw new AppError('This account has been disabled', 401, 'ACCOUNT_DISABLED')
   }
 
   const tokenMatchesStoredHash = await bcrypt.compare(refreshToken, user.refreshTokenHash)

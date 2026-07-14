@@ -1,13 +1,19 @@
 import 'dotenv/config'
 import { env } from './config/env.js'
 import { connectDB, ensureIndexes } from './config/db.js'
+import { migrateLegacyCreatorRoles } from './modules/auth/user.migrate.js'
 import app from './app.js'
 
 async function bootstrap() {
   try {
     await connectDB()
-    // Les modèles seront importés ici au fur et à mesure des phases.
-    // ensureIndexes sync les index dès qu'un modèle est enregistré.
+
+    const migrated = await migrateLegacyCreatorRoles()
+    if (migrated > 0) {
+      console.log(`✅ Migrated ${migrated} user(s): removed legacy "creator" role → "client"`)
+    }
+
+    // ensureIndexes sync les index dès qu'un modèle est enregistré (via import des routes).
     await ensureIndexes()
 
     app.listen(env.PORT, () => {

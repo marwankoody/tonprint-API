@@ -1,4 +1,5 @@
 import mongoose from 'mongoose'
+import crypto from 'crypto'
 import { Order, ORDER_STATUS_TRANSITIONS } from './order.model.js'
 import { Product } from '../products/product.model.js'
 import { User } from '../auth/user.model.js'
@@ -12,18 +13,21 @@ function escapeRegex(value) {
 
 /**
  * @param {import('mongoose').Document | object} order
- * @param {string} [userId]
+ * @param {string | null} [userId]
+ * @param {{ includeGuestToken?: boolean }} [options]
  */
-function formatOrder(order, userId) {
+function formatOrder(order, userId, options = {}) {
   const resolvedUserId =
-    userId ??
-    (order.user && typeof order.user === 'object' && order.user._id
-      ? order.user._id.toString()
-      : (order.user?.toString?.() ?? order.user))
+    userId !== undefined
+      ? userId
+      : order.user && typeof order.user === 'object' && order.user._id
+        ? order.user._id.toString()
+        : (order.user?.toString?.() ?? order.user ?? null)
 
-  return {
+  const formatted = {
     id: order._id.toString(),
     user: resolvedUserId,
+    isGuest: !resolvedUserId,
     items: (order.items || []).map((item) => ({
       id: item._id?.toString?.(),
       product: item.product?.toString?.() ?? item.product,
@@ -50,6 +54,12 @@ function formatOrder(order, userId) {
     createdAt: order.createdAt,
     updatedAt: order.updatedAt,
   }
+
+  if (options.includeGuestToken && order.guestAccessToken) {
+    formatted.guestAccessToken = order.guestAccessToken
+  }
+
+  return formatted
 }
 
 /**
@@ -61,16 +71,24 @@ function formatOrderAdmin(order) {
   const userId =
     userDoc && typeof userDoc === 'object' && userDoc._id
       ? userDoc._id.toString()
-      : (userDoc?.toString?.() ?? userDoc)
+      : (userDoc?.toString?.() ?? userDoc ?? null)
+
+  const isGuest = !userId
 
   const customer =
-    userDoc && typeof userDoc === 'object' && (userDoc.name != null || userDoc.email != null)
+    !isGuest && userDoc && typeof userDoc === 'object'
       ? {
           id: userId,
           name: userDoc.name ?? '',
           email: userDoc.email ?? '',
+          isGuest: false,
         }
-      : null
+      : {
+          id: null,
+          name: order.deliveryAddress?.fullName || '',
+          email: '',
+          isGuest: true,
+        }
 
   return {
     ...formatOrder(order, userId),
@@ -155,8 +173,9 @@ async function compensateStock(decremented) {
 
 /**
  * Crée une commande COD — prix et stock recalculés côté serveur.
+ * `userId` null → commande invité (guestAccessToken pour confirmation).
  *
- * @param {string} userId
+ * @param {string | null} userId
  * @param {{ items: object[], deliveryAddress: object }} payload
  */
 export async function createOrder(userId, payload) {
@@ -229,9 +248,12 @@ export async function createOrder(userId, payload) {
     const totalPrice = preparedItems.reduce((sum, item) => sum + item.lineTotal, 0)
 
     const orderItems = preparedItems.map(({ _productId, ...item }) => item)
+    const isGuest = !userId
+    const guestAccessToken = isGuest ? crypto.randomBytes(32).toString('hex') : null
 
     const order = await Order.create({
-      user: userId,
+      user: userId || null,
+      guestAccessToken,
       items: orderItems,
       totalPrice,
       status: 'pending_delivery',
@@ -242,12 +264,12 @@ export async function createOrder(userId, payload) {
         {
           to: 'pending_delivery',
           at: new Date(),
-          by: userId,
+          ...(userId ? { by: userId } : {}),
         },
       ],
     })
 
-    return formatOrder(order)
+    return formatOrder(order, userId || null, { includeGuestToken: isGuest })
   } catch (err) {
     await compensateStock(decremented)
     throw err
@@ -373,28 +395,38 @@ export async function getOrderAdmin(orderId) {
 }
 
 /**
- * Détail d'une commande — ownership (admin bypass).
+ * Détail d'une commande — ownership / admin, ou invité via X-Guest-Token.
  * @param {string} orderId
- * @param {{ id: string, roles?: string[] }} user
+ * @param {{ id: string, roles?: string[] } | null} user
+ * @param {string} [guestToken]
  */
-export async function getOrderById(orderId, user) {
+export async function getOrderById(orderId, user, guestToken) {
   if (!mongoose.isValidObjectId(orderId)) {
     throw new AppError('Invalid order id', 400, 'INVALID_ID')
   }
 
-  const order = await Order.findById(orderId).lean()
+  const order = await Order.findById(orderId).select('+guestAccessToken').lean()
   if (!order) {
     throw new AppError('Order not found', 404, 'ORDER_NOT_FOUND')
   }
 
-  const isAdmin = user.roles?.includes('admin')
-  const isOwner = order.user.toString() === user.id
+  const isAdmin = Boolean(user?.roles?.includes('admin'))
+  const orderUserId = order.user?.toString?.() ?? order.user
+  const isOwner = Boolean(user?.id && orderUserId && orderUserId === user.id)
+  const isGuestOk =
+    !orderUserId &&
+    Boolean(guestToken) &&
+    Boolean(order.guestAccessToken) &&
+    guestToken === order.guestAccessToken
 
-  if (!isAdmin && !isOwner) {
+  if (!isAdmin && !isOwner && !isGuestOk) {
+    if (!user && !guestToken) {
+      throw new AppError('Authentication required', 401, 'UNAUTHORIZED')
+    }
     throw new AppError('Insufficient permissions', 403, 'FORBIDDEN')
   }
 
-  return formatOrder(order)
+  return formatOrder(order, orderUserId || null)
 }
 
 /**
@@ -412,7 +444,7 @@ export async function cancelOrder(orderId, userId) {
     throw new AppError('Order not found', 404, 'ORDER_NOT_FOUND')
   }
 
-  if (order.user.toString() !== userId) {
+  if (!order.user || order.user.toString() !== userId) {
     throw new AppError('Insufficient permissions', 403, 'FORBIDDEN')
   }
 

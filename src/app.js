@@ -14,6 +14,8 @@ import authRoutes from './modules/auth/auth.routes.js'
 import productsRoutes from './modules/products/product.routes.js'
 import ordersRoutes from './modules/orders/order.routes.js'
 import blogRoutes from './modules/blog/blog.routes.js'
+import userAdminRoutes from './modules/users/user.admin.routes.js'
+import devisRoutes from './modules/devis/devis.routes.js'
 
 const app = express()
 
@@ -66,6 +68,8 @@ app.use('/api/auth', authRoutes)
 app.use('/api/products', productsRoutes)
 app.use('/api/orders', ordersRoutes)
 app.use('/api/blog', blogRoutes)
+app.use('/api/devis', devisRoutes)
+app.use('/api/admin/users', userAdminRoutes)
 
 // Modules métier (Phase 5+)
 // app.use('/api/designs', designsRoutes)

@@ -4,7 +4,7 @@ import { AppError } from '../utils/AppError.js'
  * Rôles applicatifs TonPrint.
  * @type {readonly string[]}
  */
-export const ROLES = Object.freeze(['client', 'creator', 'admin'])
+export const ROLES = Object.freeze(['client', 'admin'])
 
 /**
  * Middleware de vérification de rôle.
@@ -15,7 +15,7 @@ export const ROLES = Object.freeze(['client', 'creator', 'admin'])
  *
  * @example
  * router.get('/admin/orders', authenticate, requireRole('admin'), controller)
- * router.post('/designs', authenticate, requireRole('client', 'creator'), controller)
+ * router.post('/designs', authenticate, requireRole('client'), controller)
  */
 export function requireRole(...allowedRoles) {
   const invalid = allowedRoles.filter((r) => !ROLES.includes(r))

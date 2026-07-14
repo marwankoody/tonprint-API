@@ -83,10 +83,21 @@ const statusHistorySchema = new Schema(
 
 const orderSchema = new Schema(
   {
+    /** Présent si commande compte connecté ; null = commande invité (COD). */
     user: {
       type: Schema.Types.ObjectId,
       ref: 'User',
-      required: true,
+      default: null,
+      index: true,
+    },
+    /**
+     * Secret one-time-ish pour que l'invité retrouve sa confirmation
+     * sans compte (header X-Guest-Token). Jamais exposé en liste admin brute.
+     */
+    guestAccessToken: {
+      type: String,
+      default: null,
+      select: false,
       index: true,
     },
     items: {

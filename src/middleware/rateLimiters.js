@@ -42,3 +42,14 @@ export const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 300,
 })
+
+/**
+ * Limiteur dédié aux formulaires publics (devis, contact…) :
+ * 5 soumissions / 15 min / IP — compte aussi les succès (anti-spam).
+ */
+export const devisFormLimiter = rateLimit({
+  ...commonOptions,
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  skipSuccessfulRequests: false,
+})

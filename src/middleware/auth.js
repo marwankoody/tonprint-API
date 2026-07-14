@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken'
 import { env } from '../config/env.js'
 import { AppError } from '../utils/AppError.js'
 import { asyncHandler } from './errorHandler.js'
+import { normalizeRoles } from '../modules/auth/user.model.js'
 
 /**
  * Middleware d'authentification JWT.
@@ -21,7 +22,7 @@ export const authenticate = asyncHandler(async (req, _res, next) => {
     const payload = jwt.verify(token, env.JWT_ACCESS_SECRET)
     req.user = {
       id: payload.sub,
-      roles: payload.roles || [],
+      roles: normalizeRoles(payload.roles || []),
     }
     next()
   } catch (err) {
@@ -49,7 +50,7 @@ export const optionalAuth = asyncHandler(async (req, _res, next) => {
     const payload = jwt.verify(token, env.JWT_ACCESS_SECRET)
     req.user = {
       id: payload.sub,
-      roles: payload.roles || [],
+      roles: normalizeRoles(payload.roles || []),
     }
   } catch {
     // Token invalide/expiré → on continue anonymement

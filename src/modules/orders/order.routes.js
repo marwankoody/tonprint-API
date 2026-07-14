@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { authenticate } from '../../middleware/auth.js'
+import { authenticate, optionalAuth } from '../../middleware/auth.js'
 import { requireRole } from '../../middleware/requireRole.js'
 import { validate } from '../../middleware/validate.js'
 import {
@@ -13,21 +13,21 @@ import * as orderController from './order.controller.js'
 
 const router = Router()
 
-// Toutes les routes commandes exigent une session authentifiée
-router.use(authenticate)
+/** Création COD — connecté ou invité. */
+router.post('/', optionalAuth, validate(createOrderSchema), orderController.createOrder)
 
-router.post(
+/** Liste des commandes du client connecté. */
+router.get(
   '/',
-  requireRole('client', 'creator', 'admin'),
-  validate(createOrderSchema),
-  orderController.createOrder
+  authenticate,
+  validate(listOrdersQuerySchema, 'query'),
+  orderController.listMyOrders
 )
 
-router.get('/', validate(listOrdersQuerySchema, 'query'), orderController.listMyOrders)
-
-// --- Routes admin (dashboard commandes) — avant `/:id` pour éviter le conflit de path ---
+// --- Admin (avant `/:id` pour éviter le conflit de path) ---
 router.get(
   '/admin',
+  authenticate,
   requireRole('admin'),
   validate(adminListOrdersQuerySchema, 'query'),
   orderController.listOrdersAdmin
@@ -35,6 +35,7 @@ router.get(
 
 router.get(
   '/admin/:id',
+  authenticate,
   requireRole('admin'),
   validate(orderIdParamSchema, 'params'),
   orderController.getOrderAdmin
@@ -42,22 +43,30 @@ router.get(
 
 router.patch(
   '/admin/:id/status',
+  authenticate,
   requireRole('admin'),
   validate(orderIdParamSchema, 'params'),
   validate(updateOrderStatusSchema),
   orderController.updateOrderStatus
 )
 
-router.get(
-  '/:id',
-  validate(orderIdParamSchema, 'params'),
-  orderController.getOrder
-)
-
+/** Annulation client — compte requis. */
 router.delete(
   '/:id',
+  authenticate,
   validate(orderIdParamSchema, 'params'),
   orderController.cancelOrder
+)
+
+/**
+ * Détail — owner / admin (Bearer) OU invité (X-Guest-Token).
+ * En dernier pour ne pas capturer `/admin`.
+ */
+router.get(
+  '/:id',
+  optionalAuth,
+  validate(orderIdParamSchema, 'params'),
+  orderController.getOrder
 )
 
 export default router

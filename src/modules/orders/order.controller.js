@@ -2,7 +2,8 @@ import { asyncHandler } from '../../middleware/errorHandler.js'
 import * as orderService from './order.service.js'
 
 export const createOrder = asyncHandler(async (req, res) => {
-  const order = await orderService.createOrder(req.user.id, req.body)
+  const userId = req.user?.id ?? null
+  const order = await orderService.createOrder(userId, req.body)
   res.status(201).json({ success: true, data: { order } })
 })
 
@@ -24,7 +25,8 @@ export const getOrderAdmin = asyncHandler(async (req, res) => {
 
 export const getOrder = asyncHandler(async (req, res) => {
   const { id } = req.validatedParams ?? req.params
-  const order = await orderService.getOrderById(id, req.user)
+  const guestToken = req.get('x-guest-token') || undefined
+  const order = await orderService.getOrderById(id, req.user ?? null, guestToken)
   res.status(200).json({ success: true, data: { order } })
 })
 
