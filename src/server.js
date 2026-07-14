@@ -17,11 +17,11 @@ async function bootstrap() {
     await ensureIndexes()
 
     app.listen(env.PORT, () => {
-      console.log(`🚀 TonPrint API running on http://localhost:${env.PORT}`)
+      console.log(`TonPrint API running on http://localhost:${env.PORT}`)
       console.log(`   env: ${env.NODE_ENV}`)
     })
   } catch (err) {
-    console.error('❌ Failed to start server:', err.message)
+    console.error('Failed to start server:', err.message)
     process.exit(1)
   }
 }
