@@ -8,7 +8,9 @@ export const listProducts = asyncHandler(async (req, res) => {
 })
 
 export const getProduct = asyncHandler(async (req, res) => {
-  const product = await productService.getProductById(req.params.id)
+  // `channel=personalization` → fiche produit du catalogue créateur (éditeur).
+  const channel = req.query.channel === 'personalization' ? 'personalization' : 'marketplace'
+  const product = await productService.getProductById(req.params.id, { channel })
   res.status(200).json({ success: true, data: { product } })
 })
 
@@ -35,6 +37,11 @@ export const updateProduct = asyncHandler(async (req, res) => {
 export const deleteProduct = asyncHandler(async (req, res) => {
   const result = await productService.deleteProduct(req.params.id)
   res.status(200).json({ success: true, data: result })
+})
+
+export const uploadPrintAreaMockup = asyncHandler(async (req, res) => {
+  const mockup = await productService.uploadMockup(req.file)
+  res.status(201).json({ success: true, data: { mockup } })
 })
 
 /**

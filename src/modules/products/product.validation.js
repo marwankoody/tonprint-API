@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { PRODUCT_CATEGORIES, PRODUCT_CHANNELS } from './product.model.js'
+import { PRODUCT_CATEGORIES, PRODUCT_CHANNELS, PRINT_ZONES } from './product.model.js'
 
 const coerceBool = z.preprocess((val) => {
   if (val === 'true' || val === true) return true
@@ -30,6 +30,43 @@ const colorSchema = z.object({
     .trim()
     .regex(/^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/, 'Invalid color hex'),
 })
+
+/** URLs mockup restreintes à Cloudinary (fichiers uploadés via notre API uniquement). */
+const cloudinaryUrlSchema = z
+  .string()
+  .trim()
+  .max(500)
+  .refine((v) => v.startsWith('https://res.cloudinary.com/'), {
+    message: 'Mockup URL must be a Cloudinary URL',
+  })
+
+const printAreaMockupSchema = z.object({
+  colorName: z.string().trim().min(1).max(60),
+  url: cloudinaryUrlSchema,
+  publicId: z.string().trim().min(1).max(200),
+})
+
+const printAreaSchema = z.object({
+  zone: z.enum(PRINT_ZONES),
+  mockups: z.array(printAreaMockupSchema).max(20).default([]),
+  rectPx: z.object({
+    x: z.coerce.number().min(0),
+    y: z.coerce.number().min(0),
+    w: z.coerce.number().min(1),
+    h: z.coerce.number().min(1),
+  }),
+  sizeCm: z.object({
+    w: z.coerce.number().min(0.1).max(500),
+    h: z.coerce.number().min(0.1).max(500),
+  }),
+})
+
+const printAreasSchema = z
+  .array(printAreaSchema)
+  .max(PRINT_ZONES.length)
+  .refine((areas) => new Set(areas.map((a) => a.zone)).size === areas.length, {
+    message: 'Duplicate print zones are not allowed',
+  })
 
 const channelSchema = z
   .string()
@@ -70,6 +107,7 @@ export const createProductSchema = z.object({
   channel: channelSchema.default('marketplace'),
   description: z.string().trim().max(20000).optional().default(''),
   printType: z.string().trim().max(60).optional().default(''),
+  printTypes: z.array(z.string().trim().min(1).max(60)).max(10).optional().default([]),
   price: z.coerce.number().min(0, 'Price must be >= 0'),
   compareAtPrice: z.coerce.number().min(0).nullable().optional().default(null),
   wholesalePrice: z.coerce.number().min(0).nullable().optional().default(null),
@@ -80,6 +118,7 @@ export const createProductSchema = z.object({
   pointsCost: z.coerce.number().int().min(0).default(0),
   variants: z.array(variantSchema).optional().default([]),
   colors: z.array(colorSchema).optional().default([]),
+  printAreas: printAreasSchema.optional().default([]),
 })
 
 export const updateProductSchema = createProductSchema.partial().extend({
@@ -93,7 +132,7 @@ export const updateProductSchema = createProductSchema.partial().extend({
 export function parseMultipartProductBody(body) {
   const parsed = { ...body }
 
-  for (const key of ['variants', 'colors', 'removeImagePublicIds']) {
+  for (const key of ['variants', 'colors', 'removeImagePublicIds', 'printAreas', 'printTypes']) {
     if (typeof parsed[key] === 'string' && parsed[key].trim()) {
       try {
         parsed[key] = JSON.parse(parsed[key])

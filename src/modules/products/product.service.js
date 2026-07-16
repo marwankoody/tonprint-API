@@ -2,7 +2,11 @@ import mongoose from 'mongoose'
 import { Product } from './product.model.js'
 import { AppError } from '../../utils/AppError.js'
 import { parsePagination, paginationMeta } from '../../utils/pagination.js'
-import { uploadProductImage, deleteCloudinaryImages } from '../../lib/cloudinaryUpload.js'
+import {
+  uploadProductImage,
+  uploadPrintAreaMockup,
+  deleteCloudinaryImages,
+} from '../../lib/cloudinaryUpload.js'
 import { sanitizeRichHtml } from '../../utils/sanitizeHtml.js'
 
 /**
@@ -16,6 +20,7 @@ function formatProduct(product) {
     channel: product.channel || 'marketplace',
     description: product.description,
     printType: product.printType || '',
+    printTypes: product.printTypes || [],
     variants: product.variants,
     colors: product.colors || [],
     price: product.price,
@@ -28,9 +33,19 @@ function formatProduct(product) {
     isPointsRedeemable: product.isPointsRedeemable,
     pointsCost: product.pointsCost,
     popularity: product.popularity,
+    // Présent uniquement sur les endpoints détail (exclu des listes par projection).
+    ...(product.printAreas !== undefined ? { printAreas: product.printAreas } : {}),
     createdAt: product.createdAt,
     updatedAt: product.updatedAt,
   }
+}
+
+/** Projection listes : `printAreas` (mockups + zones) inutile hors détail. */
+const LIST_PROJECTION = '-printAreas'
+
+/** Tous les publicIds Cloudinary des mockups d'un produit. */
+function collectMockupPublicIds(printAreas = []) {
+  return printAreas.flatMap((area) => (area.mockups || []).map((m) => m.publicId))
 }
 
 /** Filtre canal : docs sans `channel` = marketplace (rétrocompat). */
@@ -73,7 +88,12 @@ export async function listProducts(query) {
   }
 
   const [products, total] = await Promise.all([
-    Product.find(filter).sort(SORT_MAP[sort] || SORT_MAP.newest).skip(skip).limit(limit).lean(),
+    Product.find(filter)
+      .select(LIST_PROJECTION)
+      .sort(SORT_MAP[sort] || SORT_MAP.newest)
+      .skip(skip)
+      .limit(limit)
+      .lean(),
     Product.countDocuments(filter),
   ])
 
@@ -121,7 +141,12 @@ export async function listProductsAdmin(query) {
   if (search) filter.name = { $regex: escapeRegex(search), $options: 'i' }
 
   const [products, total] = await Promise.all([
-    Product.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+    Product.find(filter)
+      .select(LIST_PROJECTION)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
     Product.countDocuments(filter),
   ])
 
@@ -227,6 +252,15 @@ export async function updateProduct(id, data, files = []) {
     fields.description = sanitizeRichHtml(fields.description)
   }
 
+  // printAreas remplacées : supprimer de Cloudinary les mockups qui ne sont plus référencés.
+  if (fields.printAreas !== undefined) {
+    const nextIds = new Set(collectMockupPublicIds(fields.printAreas))
+    const orphanIds = collectMockupPublicIds(product.printAreas).filter((id) => !nextIds.has(id))
+    if (orphanIds.length) {
+      await deleteCloudinaryImages(orphanIds)
+    }
+  }
+
   Object.assign(product, fields)
   await product.save()
 
@@ -247,14 +281,30 @@ export async function deleteProduct(id) {
     throw new AppError('Product not found', 404, 'PRODUCT_NOT_FOUND')
   }
 
-  const publicIds = product.images.map((img) => img.publicId)
+  const publicIds = [
+    ...product.images.map((img) => img.publicId),
+    ...collectMockupPublicIds(product.printAreas),
+  ]
   if (publicIds.length) {
     await deleteCloudinaryImages(publicIds)
   }
 
   product.isPublished = false
   product.images = []
+  product.printAreas = []
   await product.save()
 
   return { id: product._id.toString(), isPublished: false }
+}
+
+/**
+ * Upload d'un mockup de zone d'impression (admin) — retourne l'URL Cloudinary
+ * à référencer dans `printAreas[].mockups[]` du formulaire produit.
+ * @param {{ buffer: Buffer, originalname: string }} file
+ */
+export async function uploadMockup(file) {
+  if (!file?.buffer) {
+    throw new AppError('Mockup image file is required', 400, 'MOCKUP_REQUIRED')
+  }
+  return uploadPrintAreaMockup(file.buffer, file.originalname)
 }

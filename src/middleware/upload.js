@@ -42,3 +42,39 @@ export const uploadBlogCover = multer({
   fileFilter,
   limits: { fileSize: MAX_FILE_SIZE, files: 1 },
 }).single('cover')
+
+/**
+ * Middleware Multer pour un mockup de zone d'impression (1 fichier × 5 Mo).
+ * Champ attendu : `mockup`.
+ */
+export const uploadPrintAreaMockupFile = multer({
+  storage,
+  fileFilter,
+  limits: { fileSize: MAX_FILE_SIZE, files: 1 },
+}).single('mockup')
+
+/**
+ * Middleware Multer pour une image importée dans l'éditeur de designs (1 fichier × 5 Mo).
+ * Champ attendu : `image`.
+ */
+export const uploadDesignImageFile = multer({
+  storage,
+  fileFilter,
+  limits: { fileSize: MAX_FILE_SIZE, files: 1 },
+}).single('image')
+
+/** Fichier d'impression 300 DPI : plus lourd qu'une image classique (limite Cloudinary free : 10 Mo). */
+const MAX_PRINT_FILE_SIZE = 10 * 1024 * 1024
+
+/**
+ * Middleware Multer pour les exports générés par l'éditeur :
+ * `preview` (mockup web) + `printFile` (PNG isolé haute résolution).
+ */
+export const uploadDesignAssetFiles = multer({
+  storage,
+  fileFilter,
+  limits: { fileSize: MAX_PRINT_FILE_SIZE, files: 2 },
+}).fields([
+  { name: 'preview', maxCount: 1 },
+  { name: 'printFile', maxCount: 1 },
+])

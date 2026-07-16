@@ -19,6 +19,9 @@ export const PRODUCT_CATEGORIES = [
  */
 export const PRODUCT_CHANNELS = ['marketplace', 'personalization']
 
+/** Zones d'impression personnalisables (éditeur de design). */
+export const PRINT_ZONES = ['front', 'back', 'neck', 'sleeve_left', 'sleeve_right']
+
 const measurementsSchema = new Schema(
   {
     chest: { type: Number, min: 0 },
@@ -57,6 +60,39 @@ const imageSchema = new Schema(
   { _id: false }
 )
 
+/** Mockup d'une zone d'impression, par couleur de produit. */
+const printAreaMockupSchema = new Schema(
+  {
+    colorName: { type: String, required: true, trim: true, maxlength: 60 },
+    url: { type: String, required: true },
+    publicId: { type: String, required: true },
+  },
+  { _id: false }
+)
+
+/**
+ * Zone d'impression configurée par l'admin pour l'éditeur de personnalisation :
+ * - `rectPx` : rectangle imprimable en pixels sur l'image mockup (source de vérité pour le clip canvas)
+ * - `sizeCm` : dimensions réelles imprimables — sert au calcul DPI et à l'export 300 DPI
+ */
+const printAreaSchema = new Schema(
+  {
+    zone: { type: String, required: true, enum: PRINT_ZONES },
+    mockups: { type: [printAreaMockupSchema], default: [] },
+    rectPx: {
+      x: { type: Number, required: true, min: 0 },
+      y: { type: Number, required: true, min: 0 },
+      w: { type: Number, required: true, min: 1 },
+      h: { type: Number, required: true, min: 1 },
+    },
+    sizeCm: {
+      w: { type: Number, required: true, min: 0.1 },
+      h: { type: Number, required: true, min: 0.1 },
+    },
+  },
+  { _id: false }
+)
+
 const productSchema = new Schema(
   {
     name: {
@@ -91,8 +127,18 @@ const productSchema = new Schema(
       maxlength: 60,
       default: '',
     },
+    /** Types d'impression proposés dans l'éditeur de personnalisation (ex. DTF, Broderie). */
+    printTypes: {
+      type: [{ type: String, trim: true, maxlength: 60 }],
+      default: [],
+    },
     variants: {
       type: [variantSchema],
+      default: [],
+    },
+    /** Zones d'impression pour l'éditeur (produits `channel=personalization`). */
+    printAreas: {
+      type: [printAreaSchema],
       default: [],
     },
     colors: {

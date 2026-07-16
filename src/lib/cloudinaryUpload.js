@@ -5,6 +5,10 @@ import { AppError } from '../utils/AppError.js'
 
 const PRODUCT_FOLDER = 'tonprint/products'
 const BLOG_FOLDER = 'tonprint/blog'
+const MOCKUP_FOLDER = 'tonprint/products/mockups'
+const DESIGN_UPLOADS_FOLDER = 'tonprint/designs/uploads'
+const DESIGN_PREVIEWS_FOLDER = 'tonprint/designs/previews'
+const DESIGN_PRINT_FOLDER = 'tonprint/designs/print-files'
 
 function assertCloudinaryReady() {
   if (!isCloudinaryConfigured) {
@@ -20,9 +24,10 @@ function assertCloudinaryReady() {
  * @param {Buffer} buffer
  * @param {string} folder
  * @param {string} [originalName]
+ * @param {{ raw?: boolean }} [options] `raw: true` = stocker tel quel (fichiers d'impression PNG)
  * @returns {Promise<{ url: string, publicId: string }>}
  */
-function uploadImageToFolder(buffer, folder, originalName = 'image') {
+function uploadImageToFolder(buffer, folder, originalName = 'image', options = {}) {
   assertCloudinaryReady()
 
   const safeName = originalName.replace(/[^\w.-]/g, '_').slice(0, 80)
@@ -34,7 +39,8 @@ function uploadImageToFolder(buffer, folder, originalName = 'image') {
         resource_type: 'image',
         public_id: `${safeName}-${Date.now()}`,
         overwrite: false,
-        transformation: [{ fetch_format: 'webp', quality: 'auto' }],
+        // Les fichiers d'impression restent en PNG sans recompression.
+        ...(options.raw ? {} : { transformation: [{ fetch_format: 'webp', quality: 'auto' }] }),
       },
       (error, result) => {
         if (error) return reject(error)
@@ -67,6 +73,50 @@ export async function uploadProductImage(buffer, originalName = 'product') {
  */
 export async function uploadBlogCover(buffer, originalName = 'blog-cover') {
   return uploadImageToFolder(buffer, BLOG_FOLDER, originalName)
+}
+
+/**
+ * Upload un mockup de zone d'impression (éditeur de personnalisation).
+ * @param {Buffer} buffer
+ * @param {string} [originalName]
+ * @returns {Promise<{ url: string, publicId: string }>}
+ */
+export async function uploadPrintAreaMockup(buffer, originalName = 'mockup') {
+  return uploadImageToFolder(buffer, MOCKUP_FOLDER, originalName)
+}
+
+/**
+ * Upload une image importée par un créateur dans l'éditeur de designs.
+ * Rangée par utilisateur : `tonprint/designs/uploads/{userId}`.
+ * @param {Buffer} buffer
+ * @param {string} userId
+ * @param {string} [originalName]
+ * @returns {Promise<{ url: string, publicId: string }>}
+ */
+export async function uploadDesignImage(buffer, userId, originalName = 'design-image') {
+  const safeUserId = String(userId).replace(/[^\w-]/g, '')
+  return uploadImageToFolder(buffer, `${DESIGN_UPLOADS_FOLDER}/${safeUserId}`, originalName)
+}
+
+/**
+ * Upload la preview (mockup produit + design, qualité web) d'une zone de design.
+ * @param {Buffer} buffer
+ * @param {string} [originalName]
+ * @returns {Promise<{ url: string, publicId: string }>}
+ */
+export async function uploadDesignPreview(buffer, originalName = 'preview') {
+  return uploadImageToFolder(buffer, DESIGN_PREVIEWS_FOLDER, originalName)
+}
+
+/**
+ * Upload le fichier d'impression (PNG isolé fond transparent, haute résolution).
+ * Stocké tel quel — jamais recompressé (destiné à l'imprimeur).
+ * @param {Buffer} buffer
+ * @param {string} [originalName]
+ * @returns {Promise<{ url: string, publicId: string }>}
+ */
+export async function uploadDesignPrintFile(buffer, originalName = 'print-file') {
+  return uploadImageToFolder(buffer, DESIGN_PRINT_FOLDER, originalName, { raw: true })
 }
 
 /**

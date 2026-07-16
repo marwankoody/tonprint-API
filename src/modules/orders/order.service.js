@@ -2,6 +2,7 @@ import mongoose from 'mongoose'
 import crypto from 'crypto'
 import { Order, ORDER_STATUS_TRANSITIONS } from './order.model.js'
 import { Product } from '../products/product.model.js'
+import { Design } from '../designs/design.model.js'
 import { User } from '../auth/user.model.js'
 import { AppError } from '../../utils/AppError.js'
 import { parsePagination, paginationMeta } from '../../utils/pagination.js'
@@ -14,7 +15,7 @@ function escapeRegex(value) {
 /**
  * @param {import('mongoose').Document | object} order
  * @param {string | null} [userId]
- * @param {{ includeGuestToken?: boolean }} [options]
+ * @param {{ includeGuestToken?: boolean, includePrintFiles?: boolean }} [options]
  */
 function formatOrder(order, userId, options = {}) {
   const resolvedUserId =
@@ -32,6 +33,16 @@ function formatOrder(order, userId, options = {}) {
       id: item._id?.toString?.(),
       product: item.product?.toString?.() ?? item.product,
       design: item.design ? item.design.toString() : null,
+      designSnapshot: item.designSnapshot
+        ? {
+            title: item.designSnapshot.title || '',
+            zones: (item.designSnapshot.zones || []).map((zone) => ({
+              zone: zone.zone,
+              previewUrl: zone.previewUrl || '',
+              ...(options.includePrintFiles ? { printFileUrl: zone.printFileUrl || '' } : {}),
+            })),
+          }
+        : null,
       name: item.name,
       image: item.image || '',
       quantity: item.quantity,
@@ -91,7 +102,7 @@ function formatOrderAdmin(order) {
         }
 
   return {
-    ...formatOrder(order, userId),
+    ...formatOrder(order, userId, { includePrintFiles: true }),
     customer,
   }
 }
@@ -120,6 +131,46 @@ function resolveUnitPrice(product, quantity, variant) {
 function getPrimaryImageUrl(product) {
   const primary = product.images?.find((img) => img.isPrimary)
   return primary?.url || product.images?.[0]?.url || ''
+}
+
+/**
+ * Charge et valide les designs commandés par le créateur connecté.
+ * @param {{ designId?: string, productId: string }[]} inputItems
+ * @param {string | null} userId
+ */
+async function resolveDesignsForOrder(inputItems, userId) {
+  const designIds = [...new Set(inputItems.map((i) => i.designId).filter(Boolean))]
+  if (!designIds.length) return new Map()
+
+  if (!userId) {
+    throw new AppError('Authentication required to order a custom design', 401, 'UNAUTHORIZED')
+  }
+
+  const designs = await Design.find({ _id: { $in: designIds } }).lean()
+  const designMap = new Map(designs.map((d) => [d._id.toString(), d]))
+
+  for (const input of inputItems) {
+    if (!input.designId) continue
+
+    const design = designMap.get(input.designId)
+    if (!design) {
+      throw new AppError(`Design not found: ${input.designId}`, 404, 'DESIGN_NOT_FOUND')
+    }
+    if (design.creator?.toString?.() !== userId) {
+      throw new AppError('Insufficient permissions for design order', 403, 'FORBIDDEN')
+    }
+    if (design.product?.toString?.() !== input.productId) {
+      throw new AppError('Design does not belong to this product', 400, 'DESIGN_PRODUCT_MISMATCH')
+    }
+    if (
+      !design.zones?.length ||
+      design.zones.some((zone) => !zone.previewUrl || !zone.printFileUrl)
+    ) {
+      throw new AppError('Design must be saved before ordering', 400, 'DESIGN_ASSETS_REQUIRED')
+    }
+  }
+
+  return designMap
 }
 
 /**
@@ -181,11 +232,24 @@ async function compensateStock(decremented) {
 export async function createOrder(userId, payload) {
   const { items: inputItems, deliveryAddress } = payload
 
+  const hasDesignItems = inputItems.some((item) => Boolean(item.designId))
+  const hasStandardItems = inputItems.some((item) => !item.designId)
+  if (hasDesignItems && hasStandardItems) {
+    throw new AppError(
+      'Marketplace and personalization items cannot be mixed in one order',
+      400,
+      'MIXED_ORDER_CHANNELS'
+    )
+  }
+
+  const designMap = await resolveDesignsForOrder(inputItems, userId)
   const productIds = [...new Set(inputItems.map((i) => i.productId))]
   const products = await Product.find({
     _id: { $in: productIds },
     isPublished: true,
-    $or: [{ channel: 'marketplace' }, { channel: { $exists: false } }],
+    ...(hasDesignItems
+      ? { channel: 'personalization' }
+      : { $or: [{ channel: 'marketplace' }, { channel: { $exists: false } }] }),
   }).lean()
 
   const productMap = new Map(products.map((p) => [p._id.toString(), p]))
@@ -199,33 +263,51 @@ export async function createOrder(userId, payload) {
       throw new AppError(`Product not found or unavailable: ${input.productId}`, 404, 'PRODUCT_NOT_FOUND')
     }
 
+    const design = input.designId ? designMap.get(input.designId) : null
+
     let variant = null
     if (input.variantId) {
       variant = product.variants?.find((v) => v._id.toString() === input.variantId) || null
       if (!variant) {
         throw new AppError(`Variant not found on product ${product.name}`, 400, 'VARIANT_NOT_FOUND')
       }
+    } else if (design?.variant?.size) {
+      variant = product.variants?.find((v) => v.label === design.variant.size) || null
     }
 
     const unitPrice = resolveUnitPrice(product, input.quantity, variant)
     const lineTotal = unitPrice * input.quantity
+    const color = design?.variant?.colorName || input.color || undefined
+    const designPreview = design?.zones?.find((zone) => zone.previewUrl)?.previewUrl || ''
+    const designSnapshot = design
+      ? {
+          title: design.title,
+          zones: design.zones.map((zone) => ({
+            zone: zone.zone,
+            previewUrl: zone.previewUrl,
+            printFileUrl: zone.printFileUrl,
+          })),
+        }
+      : null
+    const variantSnapshot =
+      variant || color
+        ? {
+            label: variant?.label || design?.variant?.size || undefined,
+            sku: variant?.sku,
+            color,
+          }
+        : undefined
 
     preparedItems.push({
       product: product._id,
-      design: input.designId || null,
-      name: product.name,
-      image: getPrimaryImageUrl(product),
+      design: design?._id || null,
+      designSnapshot,
+      name: design ? `${product.name} - ${design.title}` : product.name,
+      image: designPreview || getPrimaryImageUrl(product),
       quantity: input.quantity,
       unitPrice,
       lineTotal,
-      variant:
-        variant || input.color
-          ? {
-              label: variant?.label,
-              sku: variant?.sku,
-              color: input.color || undefined,
-            }
-          : undefined,
+      variant: variantSnapshot,
       _productId: product._id.toString(),
     })
   }
@@ -257,7 +339,7 @@ export async function createOrder(userId, payload) {
       items: orderItems,
       totalPrice,
       status: 'pending_delivery',
-      channel: 'marketplace',
+      channel: hasDesignItems ? 'personalization' : 'marketplace',
       deliveryAddress,
       paymentMethod: 'cod',
       statusHistory: [

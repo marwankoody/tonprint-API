@@ -53,3 +53,14 @@ export const devisFormLimiter = rateLimit({
   limit: 5,
   skipSuccessfulRequests: false,
 })
+
+/**
+ * Limiteur des uploads de l'éditeur de designs (images importées + exports
+ * par zone à l'enregistrement) : protège le quota Cloudinary.
+ * Un enregistrement peut compter jusqu'à ~10 requêtes (images + 5 zones).
+ */
+export const designUploadLimiter = rateLimit({
+  ...commonOptions,
+  windowMs: 15 * 60 * 1000,
+  limit: 60,
+})

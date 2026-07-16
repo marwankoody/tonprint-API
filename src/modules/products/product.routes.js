@@ -2,7 +2,7 @@ import { Router } from 'express'
 import { authenticate } from '../../middleware/auth.js'
 import { requireRole } from '../../middleware/requireRole.js'
 import { validate } from '../../middleware/validate.js'
-import { uploadProductImages } from '../../middleware/upload.js'
+import { uploadProductImages, uploadPrintAreaMockupFile } from '../../middleware/upload.js'
 import { AppError } from '../../utils/AppError.js'
 import {
   listProductsQuerySchema,
@@ -27,6 +27,20 @@ router.get(
   productController.listProductsAdmin
 )
 router.get('/admin/:id', authenticate, requireRole('admin'), productController.getProductAdmin)
+
+/** Upload d'un mockup de zone d'impression (formulaire produit admin, champ `mockup`). */
+router.post(
+  '/admin/print-area-mockups',
+  authenticate,
+  requireRole('admin'),
+  (req, res, next) => {
+    uploadPrintAreaMockupFile(req, res, (err) => {
+      if (err) return productController.handleUploadErrors(err, req, res, next)
+      next()
+    })
+  },
+  productController.uploadPrintAreaMockup
+)
 
 router.get('/:id', productController.getProduct)
 

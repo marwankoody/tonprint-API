@@ -36,6 +36,23 @@ const variantSnapshotSchema = new Schema(
   { _id: false }
 )
 
+const designZoneSnapshotSchema = new Schema(
+  {
+    zone: { type: String, required: true, trim: true },
+    previewUrl: { type: String, default: '' },
+    printFileUrl: { type: String, default: '' },
+  },
+  { _id: false }
+)
+
+const designSnapshotSchema = new Schema(
+  {
+    title: { type: String, trim: true, default: '' },
+    zones: { type: [designZoneSnapshotSchema], default: [] },
+  },
+  { _id: false }
+)
+
 const orderItemSchema = new Schema(
   {
     product: {
@@ -43,11 +60,13 @@ const orderItemSchema = new Schema(
       ref: 'Product',
       required: true,
     },
-    /** Réservé Phase 5 — design personnalisé (pas de validation Design pour l'instant). */
     design: {
       type: Schema.Types.ObjectId,
+      ref: 'Design',
       default: null,
     },
+    /** Snapshot figé au moment de la commande pour l'atelier d'impression. */
+    designSnapshot: { type: designSnapshotSchema, default: null },
     name: { type: String, required: true, trim: true },
     image: { type: String, default: '' },
     quantity: { type: Number, required: true, min: 1 },
