@@ -191,6 +191,23 @@ const productSchema = new Schema(
       default: 0,
       min: 0,
     },
+    /**
+     * Design créateur à l'origine de ce produit marketplace.
+     * Toutes les ventes livrées de produits liés au même design comptent pour les paliers.
+     */
+    sourceDesign: {
+      type: Schema.Types.ObjectId,
+      ref: 'Design',
+      default: null,
+      index: true,
+    },
+    /** Créateur récompensé (dénormalisé depuis Design.creator — perf des agrégats). */
+    creator: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+      index: true,
+    },
     // Compteur de ventes / popularité — incrémenté plus tard par le module orders.
     popularity: {
       type: Number,
@@ -205,5 +222,7 @@ productSchema.index({ isPublished: 1, channel: 1, category: 1 })
 productSchema.index({ isPublished: 1, category: 1 })
 productSchema.index({ isPublished: 1, price: 1 })
 productSchema.index({ isPublished: 1, popularity: -1 })
+productSchema.index({ isPublished: 1, isPointsRedeemable: 1 })
+productSchema.index({ sourceDesign: 1, isPublished: 1 })
 
 export const Product = model('Product', productSchema)

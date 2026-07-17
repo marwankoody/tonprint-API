@@ -25,11 +25,32 @@ const ALLOWED_FABRIC_TYPES = new Set([
 ])
 
 const CLOUDINARY_URL_PREFIX = 'https://res.cloudinary.com/'
+/** Assets plateforme versionnés dans le frontend (`public/free-designs/`). */
+const FREE_DESIGN_PATH_PREFIX = '/free-designs/'
+
+/**
+ * Image autorisée : URL Cloudinary (upload utilisateur) ou asset free-design local.
+ * Refuse data:, javascript: et domaines externes hors Cloudinary.
+ * @param {string} src
+ */
+function isAllowedImageSrc(src) {
+  if (!src) return false
+  if (src.startsWith(CLOUDINARY_URL_PREFIX)) return true
+  if (src.startsWith(FREE_DESIGN_PATH_PREFIX)) return true
+  // Fabric sérialise parfois l'URL absolue (ex. http://localhost:5173/free-designs/...)
+  try {
+    const url = new URL(src)
+    if (url.pathname.startsWith(FREE_DESIGN_PATH_PREFIX)) return true
+  } catch {
+    // pas une URL absolue
+  }
+  return false
+}
 
 /**
  * Valide récursivement les objets d'un canvas Fabric :
  * - types whitelistés uniquement
- * - `src` des images restreint à Cloudinary (bloque data:, javascript:, domaines externes)
+ * - `src` des images = Cloudinary ou `/free-designs/` (bloque data:, javascript:, domaines externes)
  * - profondeur de groupes bornée
  * @param {unknown[]} objects
  * @param {number} depth
@@ -52,8 +73,8 @@ function validateFabricObjects(objects, depth = 0) {
 
     if (type === 'image') {
       const src = String(obj.src || '')
-      if (!src.startsWith(CLOUDINARY_URL_PREFIX)) {
-        return 'Image sources must be Cloudinary URLs'
+      if (!isAllowedImageSrc(src)) {
+        return 'Image sources must be Cloudinary URLs or platform free-design assets'
       }
     }
 
@@ -155,4 +176,14 @@ export const designIdParamSchema = z.object({
 
 export const zoneAssetsBodySchema = z.object({
   zone: z.enum(PRINT_ZONES),
+})
+
+export const listAdminDesignsQuerySchema = z.object({
+  page: z.coerce.number().int().positive().optional(),
+  limit: z.coerce.number().int().positive().optional(),
+  status: z.enum(['draft', 'pending_review', 'approved', 'rejected', 'all']).optional(),
+})
+
+export const rejectDesignSchema = z.object({
+  reason: z.string().trim().min(3).max(500),
 })

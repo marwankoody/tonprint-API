@@ -30,6 +30,18 @@ router.post('/', validate(createDesignSchema), designController.createDesign)
 
 router.get('/', validate(listDesignsQuerySchema, 'query'), designController.listMyDesigns)
 
+router.post(
+  '/:id/submit',
+  validate(designIdParamSchema, 'params'),
+  designController.submitDesign
+)
+
+router.post(
+  '/:id/withdraw',
+  validate(designIdParamSchema, 'params'),
+  designController.withdrawDesign
+)
+
 router.get('/:id', validate(designIdParamSchema, 'params'), designController.getMyDesign)
 
 router.put(

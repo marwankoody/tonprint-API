@@ -17,6 +17,9 @@ import blogRoutes from './modules/blog/blog.routes.js'
 import userAdminRoutes from './modules/users/user.admin.routes.js'
 import devisRoutes from './modules/devis/devis.routes.js'
 import designsRoutes from './modules/designs/design.routes.js'
+import designAdminRoutes from './modules/designs/design.admin.routes.js'
+import pointsRoutes from './modules/points/points.routes.js'
+import creatorRoutes from './modules/creator/creator.routes.js'
 
 const app = express()
 
@@ -71,10 +74,10 @@ app.use('/api/orders', ordersRoutes)
 app.use('/api/blog', blogRoutes)
 app.use('/api/devis', devisRoutes)
 app.use('/api/designs', designsRoutes)
+app.use('/api/admin/designs', designAdminRoutes)
 app.use('/api/admin/users', userAdminRoutes)
-
-// Modules métier (Phase 5+)
-// app.use('/api/points', pointsRoutes)
+app.use('/api/points', pointsRoutes)
+app.use('/api/creator', creatorRoutes)
 
 // 404 + erreurs
 app.use(notFound)

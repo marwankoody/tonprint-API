@@ -33,6 +33,7 @@ function formatOrder(order, userId, options = {}) {
       id: item._id?.toString?.(),
       product: item.product?.toString?.() ?? item.product,
       design: item.design ? item.design.toString() : null,
+      sourceDesign: item.sourceDesign ? item.sourceDesign.toString() : null,
       designSnapshot: item.designSnapshot
         ? {
             title: item.designSnapshot.title || '',
@@ -48,13 +49,16 @@ function formatOrder(order, userId, options = {}) {
       quantity: item.quantity,
       unitPrice: item.unitPrice,
       lineTotal: item.lineTotal,
+      unitPoints: item.unitPoints || 0,
+      linePoints: item.linePoints || 0,
       variant: item.variant || null,
     })),
     totalPrice: order.totalPrice,
+    pointsSpent: order.pointsSpent || 0,
     status: order.status,
     channel: order.channel || 'marketplace',
     deliveryAddress: order.deliveryAddress,
-    paymentMethod: order.paymentMethod,
+    paymentMethod: order.paymentMethod || 'cod',
     cancelledAt: order.cancelledAt,
     statusHistory: (order.statusHistory || []).map((h) => ({
       from: h.from,
@@ -234,22 +238,12 @@ export async function createOrder(userId, payload) {
 
   const hasDesignItems = inputItems.some((item) => Boolean(item.designId))
   const hasStandardItems = inputItems.some((item) => !item.designId)
-  if (hasDesignItems && hasStandardItems) {
-    throw new AppError(
-      'Marketplace and personalization items cannot be mixed in one order',
-      400,
-      'MIXED_ORDER_CHANNELS'
-    )
-  }
 
   const designMap = await resolveDesignsForOrder(inputItems, userId)
   const productIds = [...new Set(inputItems.map((i) => i.productId))]
   const products = await Product.find({
     _id: { $in: productIds },
     isPublished: true,
-    ...(hasDesignItems
-      ? { channel: 'personalization' }
-      : { $or: [{ channel: 'marketplace' }, { channel: { $exists: false } }] }),
   }).lean()
 
   const productMap = new Map(products.map((p) => [p._id.toString(), p]))
@@ -261,6 +255,23 @@ export async function createOrder(userId, payload) {
     const product = productMap.get(input.productId)
     if (!product) {
       throw new AppError(`Product not found or unavailable: ${input.productId}`, 404, 'PRODUCT_NOT_FOUND')
+    }
+
+    const productChannel = product.channel || 'marketplace'
+    if (input.designId) {
+      if (productChannel !== 'personalization') {
+        throw new AppError(
+          `Product ${product.name} is not available for personalization`,
+          400,
+          'INVALID_PRODUCT_CHANNEL'
+        )
+      }
+    } else if (productChannel === 'personalization') {
+      throw new AppError(
+        `Product ${product.name} requires a custom design`,
+        400,
+        'DESIGN_REQUIRED'
+      )
     }
 
     const design = input.designId ? designMap.get(input.designId) : null
@@ -301,6 +312,7 @@ export async function createOrder(userId, payload) {
     preparedItems.push({
       product: product._id,
       design: design?._id || null,
+      sourceDesign: product.sourceDesign || null,
       designSnapshot,
       name: design ? `${product.name} - ${design.title}` : product.name,
       image: designPreview || getPrimaryImageUrl(product),
@@ -339,9 +351,15 @@ export async function createOrder(userId, payload) {
       items: orderItems,
       totalPrice,
       status: 'pending_delivery',
-      channel: hasDesignItems ? 'personalization' : 'marketplace',
+      channel:
+        hasDesignItems && hasStandardItems
+          ? 'mixed'
+          : hasDesignItems
+            ? 'personalization'
+            : 'marketplace',
       deliveryAddress,
       paymentMethod: 'cod',
+      pointsSpent: 0,
       statusHistory: [
         {
           to: 'pending_delivery',
@@ -370,9 +388,15 @@ export async function listMyOrders(userId, query) {
   if (query.status) filter.status = query.status
 
   if (query.channel === 'personalization') {
-    filter.channel = 'personalization'
+    filter.channel = { $in: ['personalization', 'mixed'] }
   } else if (query.channel === 'marketplace') {
-    filter.$or = [{ channel: 'marketplace' }, { channel: { $exists: false } }]
+    filter.$or = [
+      { channel: 'marketplace' },
+      { channel: 'mixed' },
+      { channel: { $exists: false } },
+    ]
+  } else if (query.channel === 'mixed') {
+    filter.channel = 'mixed'
   }
 
   const [orders, total] = await Promise.all([
@@ -398,9 +422,17 @@ export async function listOrdersAdmin(query) {
   if (query.status) filter.status = query.status
 
   if (query.channel === 'personalization') {
-    and.push({ channel: 'personalization' })
+    and.push({ channel: { $in: ['personalization', 'mixed'] } })
   } else if (query.channel === 'marketplace') {
-    and.push({ $or: [{ channel: 'marketplace' }, { channel: { $exists: false } }] })
+    and.push({
+      $or: [
+        { channel: 'marketplace' },
+        { channel: 'mixed' },
+        { channel: { $exists: false } },
+      ],
+    })
+  } else if (query.channel === 'mixed') {
+    and.push({ channel: 'mixed' })
   }
 
   if (query.dateFrom || query.dateTo) {
@@ -540,6 +572,12 @@ export async function cancelOrder(orderId, userId) {
 
   await restoreStock(order.items)
 
+  // Rembourse les points avant de figer le statut (idempotent si retry).
+  if (order.paymentMethod === 'points' && (order.pointsSpent || 0) > 0) {
+    const { refundPointsForCancelledOrder } = await import('../points/points.service.js')
+    await refundPointsForCancelledOrder(order)
+  }
+
   const previous = order.status
   order.status = 'cancelled'
   order.cancelledAt = new Date()
@@ -582,6 +620,10 @@ export async function updateOrderStatus(orderId, nextStatus, adminId) {
   if (nextStatus === 'cancelled') {
     await restoreStock(order.items)
     order.cancelledAt = new Date()
+    if (order.paymentMethod === 'points' && (order.pointsSpent || 0) > 0) {
+      const { refundPointsForCancelledOrder } = await import('../points/points.service.js')
+      await refundPointsForCancelledOrder(order)
+    }
   }
 
   const previous = order.status
@@ -593,6 +635,12 @@ export async function updateOrderStatus(orderId, nextStatus, adminId) {
     by: adminId,
   })
   await order.save()
+
+  // Points : paliers uniquement sur ventes réellement livrées.
+  if (nextStatus === 'delivered') {
+    const { awardMilestonesForDeliveredOrder } = await import('../points/points.service.js')
+    await awardMilestonesForDeliveredOrder(order)
+  }
 
   return formatOrder(order)
 }

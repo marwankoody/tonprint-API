@@ -49,6 +49,8 @@ function formatDesign(design, options = {}) {
       ...(includePrintFiles ? { printFileUrl: z.printFileUrl || '' } : {}),
     })),
     status: design.status,
+    licenseGrantedByCreator: Boolean(design.licenseGrantedByCreator),
+    rejectionReason: design.rejectionReason || '',
     createdAt: design.createdAt,
     updatedAt: design.updatedAt,
   }
@@ -309,4 +311,134 @@ export async function saveZoneAssets(designId, userId, zone, files) {
   }
 
   return formatDesign(design)
+}
+
+/**
+ * Soumet un design à la revue TonPrint (revente marketplace / réseaux).
+ * Prérequis : au moins une zone avec preview + print file.
+ * @param {string} designId
+ * @param {string} userId
+ */
+export async function submitDesign(designId, userId) {
+  const design = await findOwnedDesign(designId, userId)
+
+  if (design.status === 'pending_review') {
+    return formatDesign(design)
+  }
+  if (design.status === 'approved') {
+    throw new AppError('Design is already approved', 400, 'ALREADY_APPROVED')
+  }
+
+  const ready = (design.zones || []).some((z) => z.previewUrl && z.printFileUrl)
+  if (!ready) {
+    throw new AppError(
+      'Save the design with print exports before submitting',
+      400,
+      'ASSETS_REQUIRED'
+    )
+  }
+
+  design.status = 'pending_review'
+  design.licenseGrantedByCreator = true
+  design.rejectionReason = ''
+  await design.save()
+  return formatDesign(design)
+}
+
+/**
+ * Retire un design de la file de revue (revient en brouillon).
+ * Impossible si déjà approuvé (produits marketplace éventuellement liés).
+ * @param {string} designId
+ * @param {string} userId
+ */
+export async function withdrawDesign(designId, userId) {
+  const design = await findOwnedDesign(designId, userId)
+
+  if (design.status === 'approved') {
+    throw new AppError('Cannot withdraw an approved design', 400, 'CANNOT_WITHDRAW')
+  }
+  if (design.status === 'draft') {
+    return formatDesign(design)
+  }
+
+  design.status = 'draft'
+  design.licenseGrantedByCreator = false
+  design.rejectionReason = ''
+  await design.save()
+  return formatDesign(design)
+}
+
+/**
+ * Liste admin des designs en attente (ou filtrés par statut).
+ * @param {{ page?: number, limit?: number, status?: string }} query
+ */
+export async function listAdminDesigns(query = {}) {
+  const { page, limit, skip } = parsePagination(query, { maxLimit: 40, defaultLimit: 20 })
+  const status = query.status || 'pending_review'
+  const filter = status === 'all' ? {} : { status }
+
+  const [items, total] = await Promise.all([
+    Design.find(filter)
+      .select('-zones.canvasJson -zones.printFilePublicId')
+      .sort({ updatedAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .populate('product', 'name category')
+      .populate('creator', 'name email')
+      .lean(),
+    Design.countDocuments(filter),
+  ])
+
+  return {
+    designs: items.map((d) => ({
+      ...formatDesign(d, { includePrintFiles: true }),
+      creator:
+        d.creator && typeof d.creator === 'object'
+          ? { id: d.creator._id.toString(), name: d.creator.name, email: d.creator.email }
+          : d.creator?.toString?.() ?? d.creator,
+    })),
+    pagination: paginationMeta({ page, limit, total }),
+  }
+}
+
+/**
+ * Approuve un design (admin). N'auto-publie pas de produit — l'admin le crée ensuite.
+ * @param {string} designId
+ */
+export async function approveDesign(designId) {
+  if (!mongoose.isValidObjectId(designId)) {
+    throw new AppError('Invalid design id', 400, 'INVALID_ID')
+  }
+  const design = await Design.findById(designId)
+  if (!design) throw new AppError('Design not found', 404, 'DESIGN_NOT_FOUND')
+  if (design.status !== 'pending_review' && design.status !== 'rejected') {
+    throw new AppError('Design is not awaiting review', 400, 'INVALID_STATUS')
+  }
+
+  design.status = 'approved'
+  design.licenseGrantedByCreator = true
+  design.rejectionReason = ''
+  await design.save()
+  return formatDesign(design, { includePrintFiles: true })
+}
+
+/**
+ * Rejette un design avec motif (admin).
+ * @param {string} designId
+ * @param {string} reason
+ */
+export async function rejectDesign(designId, reason) {
+  if (!mongoose.isValidObjectId(designId)) {
+    throw new AppError('Invalid design id', 400, 'INVALID_ID')
+  }
+  const design = await Design.findById(designId)
+  if (!design) throw new AppError('Design not found', 404, 'DESIGN_NOT_FOUND')
+  if (design.status !== 'pending_review') {
+    throw new AppError('Design is not awaiting review', 400, 'INVALID_STATUS')
+  }
+
+  design.status = 'rejected'
+  design.rejectionReason = (reason || '').trim().slice(0, 500)
+  await design.save()
+  return formatDesign(design, { includePrintFiles: true })
 }

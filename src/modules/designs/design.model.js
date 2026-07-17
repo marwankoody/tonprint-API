@@ -77,10 +77,17 @@ const designSchema = new Schema(
       type: Boolean,
       default: false,
     },
+    rejectionReason: {
+      type: String,
+      trim: true,
+      maxlength: 500,
+      default: '',
+    },
   },
   { timestamps: true }
 )
 
 designSchema.index({ creator: 1, updatedAt: -1 })
+designSchema.index({ status: 1, updatedAt: -1 })
 
 export const Design = model('Design', designSchema)

@@ -8,7 +8,33 @@ import {
   deleteCloudinaryImages,
 } from '../../lib/cloudinaryUpload.js'
 import { sanitizeRichHtml } from '../../utils/sanitizeHtml.js'
+import { Design } from '../designs/design.model.js'
 
+/**
+ * Résout sourceDesign → creator (dénormalisé). Chaîne vide / null détache le lien.
+ * @param {object} data
+ */
+async function resolveSourceDesignFields(data) {
+  if (data.sourceDesign === undefined) return data
+
+  if (!data.sourceDesign) {
+    return { ...data, sourceDesign: null, creator: null }
+  }
+
+  const design = await Design.findById(data.sourceDesign).select('creator licenseGrantedByCreator status').lean()
+  if (!design) {
+    throw new AppError('Source design not found', 404, 'DESIGN_NOT_FOUND')
+  }
+  if (!design.licenseGrantedByCreator) {
+    throw new AppError('Design is not licensed for public sale', 400, 'DESIGN_NOT_LICENSED')
+  }
+
+  return {
+    ...data,
+    sourceDesign: design._id,
+    creator: design.creator,
+  }
+}
 /**
  * @param {import('mongoose').Document | object} product
  */
@@ -32,6 +58,8 @@ function formatProduct(product) {
     isPublished: product.isPublished,
     isPointsRedeemable: product.isPointsRedeemable,
     pointsCost: product.pointsCost,
+    sourceDesign: product.sourceDesign?.toString?.() ?? product.sourceDesign ?? null,
+    creator: product.creator?.toString?.() ?? product.creator ?? null,
     popularity: product.popularity,
     // Présent uniquement sur les endpoints détail (exclu des listes par projection).
     ...(product.printAreas !== undefined ? { printAreas: product.printAreas } : {}),
@@ -72,7 +100,8 @@ const SORT_MAP = {
  */
 export async function listProducts(query) {
   const { page, limit, skip } = parsePagination(query, { maxLimit: 20, defaultLimit: 12 })
-  const { category, minPrice, maxPrice, sort = 'newest', channel = 'marketplace', search } = query
+  const { category, minPrice, maxPrice, sort = 'newest', channel = 'marketplace', search, redeemable } =
+    query
 
   const filter = {
     isPublished: true,
@@ -81,6 +110,10 @@ export async function listProducts(query) {
 
   if (category) filter.category = category
   if (search) filter.name = { $regex: escapeRegex(search), $options: 'i' }
+  if (redeemable === true) {
+    filter.isPointsRedeemable = true
+    filter.pointsCost = { $gt: 0 }
+  }
   if (minPrice !== undefined || maxPrice !== undefined) {
     filter.price = {}
     if (minPrice !== undefined) filter.price.$gte = minPrice
@@ -202,9 +235,11 @@ export async function createProduct(data, files = []) {
     throw new AppError('At least one product image is required', 400, 'IMAGES_REQUIRED')
   }
 
+  const resolved = await resolveSourceDesignFields(data)
+
   const product = await Product.create({
-    ...data,
-    description: sanitizeRichHtml(data.description || ''),
+    ...resolved,
+    description: sanitizeRichHtml(resolved.description || ''),
     images,
   })
   return formatProduct(product)
@@ -250,6 +285,12 @@ export async function updateProduct(id, data, files = []) {
 
   if (fields.description !== undefined) {
     fields.description = sanitizeRichHtml(fields.description)
+  }
+
+  if (fields.sourceDesign !== undefined) {
+    const resolved = await resolveSourceDesignFields(fields)
+    fields.sourceDesign = resolved.sourceDesign
+    fields.creator = resolved.creator
   }
 
   // printAreas remplacées : supprimer de Cloudinary les mockups qui ne sont plus référencés.

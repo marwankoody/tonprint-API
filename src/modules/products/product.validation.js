@@ -84,6 +84,7 @@ export const listProductsQuerySchema = z.object({
   minPrice: z.coerce.number().min(0).optional(),
   maxPrice: z.coerce.number().min(0).optional(),
   sort: z.enum(['price_asc', 'price_desc', 'popularity', 'newest']).optional().default('newest'),
+  redeemable: coerceBool.optional(),
 })
 
 /** Query pour `GET /api/products/admin` — gestion catalogue (inclut les brouillons). */
@@ -116,6 +117,14 @@ export const createProductSchema = z.object({
   isPublished: coerceBool.optional().default(false),
   isPointsRedeemable: coerceBool.optional().default(false),
   pointsCost: z.coerce.number().int().min(0).default(0),
+  /** Design créateur lié (marketplace) — ObjectId ou chaîne vide pour détacher. */
+  sourceDesign: z
+    .string()
+    .trim()
+    .regex(/^[a-fA-F0-9]{24}$/, 'Invalid sourceDesign id')
+    .or(z.literal(''))
+    .optional()
+    .nullable(),
   variants: z.array(variantSchema).optional().default([]),
   colors: z.array(colorSchema).optional().default([]),
   printAreas: printAreasSchema.optional().default([]),

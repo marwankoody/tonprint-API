@@ -39,3 +39,32 @@ export const saveZoneAssets = asyncHandler(async (req, res) => {
   const design = await designService.saveZoneAssets(id, req.user.id, req.body.zone, req.files)
   res.status(200).json({ success: true, data: { design } })
 })
+
+export const submitDesign = asyncHandler(async (req, res) => {
+  const { id } = req.validatedParams ?? req.params
+  const design = await designService.submitDesign(id, req.user.id)
+  res.status(200).json({ success: true, data: { design } })
+})
+
+export const withdrawDesign = asyncHandler(async (req, res) => {
+  const { id } = req.validatedParams ?? req.params
+  const design = await designService.withdrawDesign(id, req.user.id)
+  res.status(200).json({ success: true, data: { design } })
+})
+
+export const listAdminDesigns = asyncHandler(async (req, res) => {
+  const result = await designService.listAdminDesigns(req.validatedQuery ?? req.query)
+  res.status(200).json({ success: true, data: result })
+})
+
+export const approveDesign = asyncHandler(async (req, res) => {
+  const { id } = req.validatedParams ?? req.params
+  const design = await designService.approveDesign(id)
+  res.status(200).json({ success: true, data: { design } })
+})
+
+export const rejectDesign = asyncHandler(async (req, res) => {
+  const { id } = req.validatedParams ?? req.params
+  const design = await designService.rejectDesign(id, req.body.reason)
+  res.status(200).json({ success: true, data: { design } })
+})
