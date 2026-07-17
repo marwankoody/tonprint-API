@@ -20,6 +20,7 @@ import designsRoutes from './modules/designs/design.routes.js'
 import designAdminRoutes from './modules/designs/design.admin.routes.js'
 import pointsRoutes from './modules/points/points.routes.js'
 import creatorRoutes from './modules/creator/creator.routes.js'
+import contactRoutes from './modules/contact/contact.routes.js'
 
 const app = express()
 
@@ -78,6 +79,7 @@ app.use('/api/admin/designs', designAdminRoutes)
 app.use('/api/admin/users', userAdminRoutes)
 app.use('/api/points', pointsRoutes)
 app.use('/api/creator', creatorRoutes)
+app.use('/api/contact', contactRoutes)
 
 // 404 + erreurs
 app.use(notFound)

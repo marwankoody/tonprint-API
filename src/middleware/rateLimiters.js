@@ -54,6 +54,9 @@ export const devisFormLimiter = rateLimit({
   skipSuccessfulRequests: false,
 })
 
+/** Alias sémantique — même quota anti-spam que le formulaire devis. */
+export const contactFormLimiter = devisFormLimiter
+
 /**
  * Limiteur des uploads de l'éditeur de designs (images importées + exports
  * par zone à l'enregistrement) : protège le quota Cloudinary.

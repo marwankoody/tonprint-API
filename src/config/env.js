@@ -22,6 +22,9 @@ const envSchema = z.object({
   CLOUDINARY_CLOUD_NAME: z.string().optional().default(''),
   CLOUDINARY_API_KEY: z.string().optional().default(''),
   CLOUDINARY_API_SECRET: z.string().optional().default(''),
+  // Contact form → Google Sheets (Apps Script web app URL + shared secret)
+  CONTACT_SHEETS_WEBHOOK_URL: z.string().optional().default(''),
+  CONTACT_SHEETS_SECRET: z.string().optional().default(''),
 })
 
 const parsed = envSchema.safeParse(process.env)
@@ -45,4 +48,9 @@ export const corsOrigins = env.CORS_ORIGINS.split(',')
 /** Cloudinary est configuré si les 3 variables sont renseignées. */
 export const isCloudinaryConfigured = Boolean(
   env.CLOUDINARY_CLOUD_NAME && env.CLOUDINARY_API_KEY && env.CLOUDINARY_API_SECRET
+)
+
+/** Contact → Google Sheets prêt si webhook + secret sont définis. */
+export const isContactSheetsConfigured = Boolean(
+  env.CONTACT_SHEETS_WEBHOOK_URL && env.CONTACT_SHEETS_SECRET
 )
