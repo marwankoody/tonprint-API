@@ -1,5 +1,4 @@
 import { asyncHandler } from '../../middleware/errorHandler.js'
-import { AppError } from '../../utils/AppError.js'
 import * as productService from './product.service.js'
 
 export const listProducts = asyncHandler(async (req, res) => {
@@ -43,17 +42,3 @@ export const uploadPrintAreaMockup = asyncHandler(async (req, res) => {
   const mockup = await productService.uploadMockup(req.file)
   res.status(201).json({ success: true, data: { mockup } })
 })
-
-/**
- * Middleware Multer : transmet les erreurs Multer au handler global.
- * @type {import('express').RequestHandler}
- */
-export const handleUploadErrors = (err, _req, _res, next) => {
-  if (err?.code === 'LIMIT_FILE_SIZE') {
-    return next(new AppError('Image too large (max 5 MB)', 400, 'FILE_TOO_LARGE'))
-  }
-  if (err?.code === 'LIMIT_FILE_COUNT') {
-    return next(new AppError('Too many images (max 5)', 400, 'TOO_MANY_FILES'))
-  }
-  return next(err)
-}

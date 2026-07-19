@@ -22,6 +22,9 @@ export const PRODUCT_CHANNELS = ['marketplace', 'personalization']
 /** Zones d'impression personnalisables (éditeur de design). */
 export const PRINT_ZONES = ['front', 'back', 'neck', 'sleeve_left', 'sleeve_right']
 
+/** Qualités produit (chacune avec son propre prix). */
+export const PRODUCT_QUALITY_KEYS = ['normal', 'premium', 'oversize']
+
 const measurementsSchema = new Schema(
   {
     chest: { type: Number, min: 0 },
@@ -47,6 +50,15 @@ const colorSchema = new Schema(
   {
     name: { type: String, required: true, trim: true },
     hex: { type: String, required: true, trim: true, match: /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/ },
+  },
+  { _id: false }
+)
+
+/** Qualité vendable : clé fixe + prix absolu (remplace le prix de base si sélectionnée). */
+const qualitySchema = new Schema(
+  {
+    key: { type: String, required: true, enum: PRODUCT_QUALITY_KEYS },
+    price: { type: Number, required: true, min: 0 },
   },
   { _id: false }
 )
@@ -145,6 +157,11 @@ const productSchema = new Schema(
       type: [colorSchema],
       default: [],
     },
+    /** Qualités proposées (normal / premium / oversize) avec prix dédié. */
+    qualities: {
+      type: [qualitySchema],
+      default: [],
+    },
     price: {
       type: Number,
       required: [true, 'Price is required'],
@@ -201,12 +218,11 @@ const productSchema = new Schema(
       default: null,
       index: true,
     },
-    /** Créateur récompensé (dénormalisé depuis Design.creator — perf des agrégats). */
+    /** Créateur récompensé (dénormalisé depuis Design.creator). */
     creator: {
       type: Schema.Types.ObjectId,
       ref: 'User',
       default: null,
-      index: true,
     },
     // Compteur de ventes / popularité — incrémenté plus tard par le module orders.
     popularity: {
@@ -219,10 +235,14 @@ const productSchema = new Schema(
 )
 
 productSchema.index({ isPublished: 1, channel: 1, category: 1 })
+productSchema.index({ isPublished: 1, channel: 1, createdAt: -1 })
+productSchema.index({ isPublished: 1, channel: 1, popularity: -1 })
 productSchema.index({ isPublished: 1, category: 1 })
 productSchema.index({ isPublished: 1, price: 1 })
 productSchema.index({ isPublished: 1, popularity: -1 })
 productSchema.index({ isPublished: 1, isPointsRedeemable: 1 })
 productSchema.index({ sourceDesign: 1, isPublished: 1 })
+/** Recherche catalogue : utilise `$text` (voir product.service list*). explain() en staging pour vérifier. */
+productSchema.index({ name: 'text' })
 
 export const Product = model('Product', productSchema)

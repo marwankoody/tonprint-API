@@ -2,7 +2,7 @@ import mongoose from 'mongoose'
 
 const { Schema, model } = mongoose
 
-export const LEDGER_TYPES = Object.freeze(['credit', 'debit'])
+const LEDGER_TYPES = Object.freeze(['credit', 'debit'])
 
 /**
  * Livre de compte des points — source de vérité des mouvements.

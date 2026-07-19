@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { PRINT_ZONES } from '../products/product.model.js'
+import { corsOrigins, env } from '../../config/env.js'
 
 /** Taille max du canvasJson sérialisé par zone (les images sont des URLs, jamais du base64). */
 const MAX_CANVAS_JSON_BYTES = 200 * 1024
@@ -24,23 +25,30 @@ const ALLOWED_FABRIC_TYPES = new Set([
   'group',
 ])
 
-const CLOUDINARY_URL_PREFIX = 'https://res.cloudinary.com/'
 /** Assets plateforme versionnés dans le frontend (`public/free-designs/`). */
 const FREE_DESIGN_PATH_PREFIX = '/free-designs/'
 
+function cloudinaryUrlPrefix() {
+  const cloud = env.CLOUDINARY_CLOUD_NAME
+  return cloud ? `https://res.cloudinary.com/${cloud}/` : 'https://res.cloudinary.com/'
+}
+
 /**
- * Image autorisée : URL Cloudinary (upload utilisateur) ou asset free-design local.
- * Refuse data:, javascript: et domaines externes hors Cloudinary.
+ * Image autorisée : URL Cloudinary (notre cloud) ou asset free-design
+ * (chemin relatif, ou absolu dont l'origin ∈ CORS_ORIGINS).
+ * Refuse data:, javascript: et domaines externes.
  * @param {string} src
  */
 function isAllowedImageSrc(src) {
   if (!src) return false
-  if (src.startsWith(CLOUDINARY_URL_PREFIX)) return true
+  const cloudinaryPrefix = cloudinaryUrlPrefix()
+  if (src.startsWith(cloudinaryPrefix)) return true
   if (src.startsWith(FREE_DESIGN_PATH_PREFIX)) return true
   // Fabric sérialise parfois l'URL absolue (ex. http://localhost:5173/free-designs/...)
   try {
     const url = new URL(src)
-    if (url.pathname.startsWith(FREE_DESIGN_PATH_PREFIX)) return true
+    if (!url.pathname.startsWith(FREE_DESIGN_PATH_PREFIX)) return false
+    return corsOrigins.includes(url.origin)
   } catch {
     // pas une URL absolue
   }
@@ -130,6 +138,7 @@ const designVariantSchema = z.object({
     .optional()
     .default(''),
   size: z.string().trim().max(30).optional().default(''),
+  quality: z.string().trim().max(20).optional().default(''),
   printType: z.string().trim().max(60).optional().default(''),
 })
 

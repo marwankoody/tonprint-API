@@ -2,13 +2,18 @@ import { Router } from 'express'
 import { authenticate } from '../../middleware/auth.js'
 import { requireRole } from '../../middleware/requireRole.js'
 import { validate } from '../../middleware/validate.js'
-import { uploadProductImages, uploadPrintAreaMockupFile } from '../../middleware/upload.js'
+import {
+  uploadProductImages,
+  uploadPrintAreaMockupFile,
+  handleUploadErrors,
+} from '../../middleware/upload.js'
 import { AppError } from '../../utils/AppError.js'
 import {
   listProductsQuerySchema,
   adminListProductsQuerySchema,
   createProductSchema,
   updateProductSchema,
+  productIdParamSchema,
   parseMultipartProductBody,
 } from './product.validation.js'
 import * as productController from './product.controller.js'
@@ -26,7 +31,13 @@ router.get(
   validate(adminListProductsQuerySchema, 'query'),
   productController.listProductsAdmin
 )
-router.get('/admin/:id', authenticate, requireRole('admin'), productController.getProductAdmin)
+router.get(
+  '/admin/:id',
+  authenticate,
+  requireRole('admin'),
+  validate(productIdParamSchema, 'params'),
+  productController.getProductAdmin
+)
 
 /** Upload d'un mockup de zone d'impression (formulaire produit admin, champ `mockup`). */
 router.post(
@@ -35,14 +46,14 @@ router.post(
   requireRole('admin'),
   (req, res, next) => {
     uploadPrintAreaMockupFile(req, res, (err) => {
-      if (err) return productController.handleUploadErrors(err, req, res, next)
+      if (err) return handleUploadErrors(err, req, res, next)
       next()
     })
   },
   productController.uploadPrintAreaMockup
 )
 
-router.get('/:id', productController.getProduct)
+router.get('/:id', validate(productIdParamSchema, 'params'), productController.getProduct)
 
 // --- Routes admin (CRUD + upload Cloudinary) ---
 router.post(
@@ -51,7 +62,7 @@ router.post(
   requireRole('admin'),
   (req, res, next) => {
     uploadProductImages(req, res, (err) => {
-      if (err) return productController.handleUploadErrors(err, req, res, next)
+      if (err) return handleUploadErrors(err, req, res, next)
       try {
         req.body = parseMultipartProductBody(req.body)
         next()
@@ -68,9 +79,10 @@ router.put(
   '/:id',
   authenticate,
   requireRole('admin'),
+  validate(productIdParamSchema, 'params'),
   (req, res, next) => {
     uploadProductImages(req, res, (err) => {
-      if (err) return productController.handleUploadErrors(err, req, res, next)
+      if (err) return handleUploadErrors(err, req, res, next)
       try {
         req.body = parseMultipartProductBody(req.body)
         next()
@@ -87,6 +99,7 @@ router.delete(
   '/:id',
   authenticate,
   requireRole('admin'),
+  validate(productIdParamSchema, 'params'),
   productController.deleteProduct
 )
 

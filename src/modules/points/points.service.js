@@ -1,16 +1,18 @@
 import mongoose from 'mongoose'
 import { PointsLedger } from './pointsLedger.model.js'
-import {
-  MILESTONE_SIZE,
-  POINTS_PER_MILESTONE,
-  milestoneIdempotencyKey,
-} from './points.constants.js'
+import { milestoneIdempotencyKey } from './points.constants.js'
+import { getPointsSettings } from './pointsSettings.service.js'
 import { User } from '../auth/user.model.js'
 import { Order } from '../orders/order.model.js'
 import { Design } from '../designs/design.model.js'
 import { Product } from '../products/product.model.js'
 import { AppError } from '../../utils/AppError.js'
 import { parsePagination, paginationMeta } from '../../utils/pagination.js'
+
+/** Retire le préfixe "Admin (id): …" des anciennes écritures (jamais exposé au client). */
+function sanitizeReasonForClient(reason) {
+  return String(reason || '').replace(/^Admin\s*\([^)]+\):\s*/i, '').trim()
+}
 
 /**
  * @param {import('mongoose').Document | object} entry
@@ -21,7 +23,7 @@ function formatLedgerEntry(entry) {
     type: entry.type,
     amount: entry.amount,
     balanceAfter: entry.balanceAfter,
-    reason: entry.reason,
+    reason: sanitizeReasonForClient(entry.reason),
     relatedDesign: entry.relatedDesign?.toString?.() ?? entry.relatedDesign ?? null,
     relatedOrder: entry.relatedOrder?.toString?.() ?? entry.relatedOrder ?? null,
     relatedProduct: entry.relatedProduct?.toString?.() ?? entry.relatedProduct ?? null,
@@ -39,7 +41,7 @@ function formatLedgerEntry(entry) {
  * @param {string} idempotencyKey
  * @param {{ relatedDesign?: string|null, relatedOrder?: string|null, relatedProduct?: string|null }} [meta]
  */
-export async function creditPoints(userId, amount, reason, idempotencyKey, meta = {}) {
+async function creditPoints(userId, amount, reason, idempotencyKey, meta = {}) {
   if (!Number.isInteger(amount) || amount < 1) {
     throw new AppError('Credit amount must be a positive integer', 400, 'INVALID_POINTS_AMOUNT')
   }
@@ -93,7 +95,7 @@ export async function creditPoints(userId, amount, reason, idempotencyKey, meta 
  * @param {string} idempotencyKey
  * @param {{ relatedOrder?: string|null, relatedProduct?: string|null }} [meta]
  */
-export async function debitPoints(userId, amount, reason, idempotencyKey, meta = {}) {
+async function debitPoints(userId, amount, reason, idempotencyKey, meta = {}) {
   if (!Number.isInteger(amount) || amount < 1) {
     throw new AppError('Debit amount must be a positive integer', 400, 'INVALID_POINTS_AMOUNT')
   }
@@ -138,13 +140,21 @@ export async function debitPoints(userId, amount, reason, idempotencyKey, meta =
 }
 
 /**
- * Solde courant (cache User — mis à jour atomiquement avec le ledger).
+ * Solde courant (cache User — mis à jour atomiquement avec le ledger)
+ * + paramètres paliers (pour copy UI créateur).
  * @param {string} userId
  */
 export async function getBalance(userId) {
-  const user = await User.findById(userId).select('pointsBalance').lean()
+  const [user, settings] = await Promise.all([
+    User.findById(userId).select('pointsBalance').lean(),
+    getPointsSettings(),
+  ])
   if (!user) throw new AppError('User not found', 404, 'USER_NOT_FOUND')
-  return { balance: user.pointsBalance ?? 0 }
+  return {
+    balance: user.pointsBalance ?? 0,
+    milestoneSize: settings.milestoneSize,
+    pointsPerMilestone: settings.pointsPerMilestone,
+  }
 }
 
 /**
@@ -175,7 +185,7 @@ export async function getHistory(userId, query = {}) {
  * Index : items.sourceDesign + filtre status=delivered.
  * @param {string} designId
  */
-export async function countDeliveredSalesForDesign(designId) {
+async function countDeliveredSalesForDesign(designId) {
   const designObjectId = new mongoose.Types.ObjectId(designId)
   const [row] = await Order.aggregate([
     { $match: { status: 'delivered', 'items.sourceDesign': designObjectId } },
@@ -188,36 +198,40 @@ export async function countDeliveredSalesForDesign(designId) {
 
 /**
  * Recalcule les ventes livrées d'un design et crédite les paliers manquants
- * (10, 20, 30… × POINTS_PER_MILESTONE). Idempotent via clés ledger.
+ * (milestoneSize, 2×, 3×… × pointsPerMilestone). Idempotent via clés ledger.
  *
  * @param {string} designId
  * @returns {Promise<{ awarded: number, sales: number, balance?: number }>}
  */
-export async function checkAndAwardMilestone(designId) {
+async function checkAndAwardMilestone(designId) {
   if (!mongoose.isValidObjectId(designId)) return { awarded: 0, sales: 0 }
 
   const design = await Design.findById(designId).select('creator licenseGrantedByCreator status').lean()
   if (!design?.licenseGrantedByCreator) return { awarded: 0, sales: 0 }
   if (!design.creator) return { awarded: 0, sales: 0 }
 
-  const sales = await countDeliveredSalesForDesign(designId)
-  const reachedMilestones = Math.floor(sales / MILESTONE_SIZE)
+  const [{ milestoneSize, pointsPerMilestone }, sales] = await Promise.all([
+    getPointsSettings(),
+    countDeliveredSalesForDesign(designId),
+  ])
+
+  const reachedMilestones = Math.floor(sales / milestoneSize)
   if (reachedMilestones < 1) return { awarded: 0, sales }
 
   let awarded = 0
   let lastBalance
 
   for (let n = 1; n <= reachedMilestones; n++) {
-    const units = n * MILESTONE_SIZE
+    const units = n * milestoneSize
     const key = milestoneIdempotencyKey(designId, units)
     const result = await creditPoints(
       design.creator.toString(),
-      POINTS_PER_MILESTONE,
+      pointsPerMilestone,
       `Palier ${units} ventes livrées`,
       key,
       { relatedDesign: designId }
     )
-    if (!result.duplicated) awarded += POINTS_PER_MILESTONE
+    if (!result.duplicated) awarded += pointsPerMilestone
     lastBalance = result.balance
   }
 
@@ -237,16 +251,17 @@ export async function awardMilestonesForDeliveredOrder(order) {
         .filter(Boolean)
     ),
   ]
-  const results = []
-  for (const designId of designIds) {
-    try {
-      results.push({ designId, ...(await checkAndAwardMilestone(designId)) })
-    } catch (err) {
-      console.error(`[points] milestone award failed for design ${designId}:`, err?.message || err)
-      results.push({ designId, awarded: 0, error: true })
-    }
-  }
-  return results
+  // Designs indépendants → parallèle (idempotence gérée par les clés ledger).
+  return Promise.all(
+    designIds.map(async (designId) => {
+      try {
+        return { designId, ...(await checkAndAwardMilestone(designId)) }
+      } catch (err) {
+        console.error(`[points] milestone award failed for design ${designId}:`, err?.message || err)
+        return { designId, awarded: 0, error: true }
+      }
+    })
+  )
 }
 
 /**
@@ -265,7 +280,7 @@ export async function redeemProduct(userId, payload) {
     isPublished: true,
     isPointsRedeemable: true,
     $or: [{ channel: 'marketplace' }, { channel: { $exists: false } }],
-  })
+  }).lean()
   if (!product) {
     throw new AppError('Product not available for points redemption', 404, 'PRODUCT_NOT_FOUND')
   }
@@ -275,8 +290,22 @@ export async function redeemProduct(userId, payload) {
 
   let variant = null
   if (payload.variantId) {
-    variant = product.variants?.id?.(payload.variantId) || product.variants?.find((v) => v._id.toString() === payload.variantId)
+    variant =
+      product.variants?.find((v) => v._id?.toString?.() === payload.variantId) || null
     if (!variant) throw new AppError('Variant not found', 400, 'VARIANT_NOT_FOUND')
+  }
+
+  const productQualities = product.qualities || []
+  let qualityKey = payload.quality || undefined
+  if (productQualities.length > 0) {
+    if (!qualityKey) {
+      throw new AppError('Quality is required for this product', 400, 'QUALITY_REQUIRED')
+    }
+    if (!productQualities.some((q) => q.key === qualityKey)) {
+      throw new AppError('Quality not available for this product', 400, 'QUALITY_NOT_FOUND')
+    }
+  } else {
+    qualityKey = undefined
   }
 
   const pointsRequired = product.pointsCost * quantity
@@ -286,10 +315,15 @@ export async function redeemProduct(userId, payload) {
   }
 
   // Stock d'abord (conditionnel) — compensation si le reste échoue.
+  // `$elemMatch` garantit que _id et stock matchent le MÊME élément du tableau
+  // (deux conditions séparées pourraient matcher deux variantes différentes).
   let stockDecremented = false
   if (variant) {
     const updated = await Product.findOneAndUpdate(
-      { _id: product._id, 'variants._id': variant._id, 'variants.stock': { $gte: stockNeeded } },
+      {
+        _id: product._id,
+        variants: { $elemMatch: { _id: variant._id, stock: { $gte: stockNeeded } } },
+      },
       { $inc: { 'variants.$.stock': -stockNeeded, stock: -stockNeeded, popularity: stockNeeded } },
       { new: true }
     )
@@ -332,8 +366,8 @@ export async function redeemProduct(userId, payload) {
           lineTotal: 0,
           unitPoints,
           linePoints: pointsRequired,
-          variant: variant
-            ? { label: variant.label, sku: variant.sku, color: undefined }
+          variant: variant || qualityKey
+            ? { label: variant?.label, sku: variant?.sku, color: undefined, quality: qualityKey }
             : undefined,
         },
       ],
@@ -345,6 +379,11 @@ export async function redeemProduct(userId, payload) {
       paymentMethod: 'points',
       statusHistory: [{ to: 'pending_delivery', at: new Date(), by: userId }],
     })
+
+    const { emitNotification, notifyAdminsOrderCreated } = await import(
+      '../notifications/notification.service.js'
+    )
+    emitNotification(() => notifyAdminsOrderCreated(order), 'order_created_points')
 
     return {
       order: {
@@ -420,7 +459,8 @@ export async function refundPointsForCancelledOrder(order) {
  */
 export async function adminAdjustPoints(userId, payload, adminId) {
   const amount = payload.amount
-  const reason = `Admin (${adminId}): ${payload.reason}`.slice(0, 200)
+  // Raison client-facing uniquement (pas d'id / nom admin). L'admin reste dans la clé d'idempotence.
+  const reason = String(payload.reason || '').trim().slice(0, 200)
   const key = `admin-adjust:${adminId}:${userId}:${Date.now()}:${amount}:${payload.type}`
 
   if (payload.type === 'credit') {

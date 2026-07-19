@@ -21,6 +21,9 @@ function sanitizeUser(user) {
     name: user.name,
     email: user.email,
     phone: user.phone || '',
+    city: user.city || '',
+    address: user.address || '',
+    postalCode: user.postalCode || '',
     roles: normalizeRoles(user.roles),
     pointsBalance: user.pointsBalance,
     isActive: user.isActive !== false,
@@ -148,9 +151,12 @@ export async function getMe(userId) {
 
 /**
  * @param {string} userId
- * @param {{ name: string, email: string, phone?: string }} input
+ * @param {{ name: string, email: string, phone?: string, city?: string, address?: string, postalCode?: string }} input
  */
-export async function updateProfile(userId, { name, email, phone = '' }) {
+export async function updateProfile(
+  userId,
+  { name, email, phone = '', city = '', address = '', postalCode = '' }
+) {
   const emailTaken = await User.exists({ email, _id: { $ne: userId } })
   if (emailTaken) {
     throw new AppError('An account with this email already exists', 409, 'EMAIL_TAKEN')
@@ -158,7 +164,7 @@ export async function updateProfile(userId, { name, email, phone = '' }) {
 
   const user = await User.findByIdAndUpdate(
     userId,
-    { $set: { name, email, phone } },
+    { $set: { name, email, phone, city, address, postalCode } },
     { returnDocument: 'after', runValidators: true }
   ).lean()
 

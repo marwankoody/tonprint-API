@@ -16,6 +16,7 @@ const designVariantSchema = new Schema(
     colorName: { type: String, trim: true, maxlength: 60, default: '' },
     colorHex: { type: String, trim: true, maxlength: 7, default: '' },
     size: { type: String, trim: true, maxlength: 30, default: '' },
+    quality: { type: String, trim: true, maxlength: 20, default: '' },
     printType: { type: String, trim: true, maxlength: 60, default: '' },
   },
   { _id: false }

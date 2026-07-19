@@ -1,5 +1,4 @@
 import { asyncHandler } from '../../middleware/errorHandler.js'
-import { AppError } from '../../utils/AppError.js'
 import * as blogService from './blog.service.js'
 
 export const listPosts = asyncHandler(async (req, res) => {
@@ -41,16 +40,3 @@ export const deletePost = asyncHandler(async (req, res) => {
   const result = await blogService.deletePost(id)
   res.status(200).json({ success: true, data: result })
 })
-
-/**
- * @type {import('express').RequestHandler}
- */
-export const handleUploadErrors = (err, _req, _res, next) => {
-  if (err?.code === 'LIMIT_FILE_SIZE') {
-    return next(new AppError('Image too large (max 5 MB)', 400, 'FILE_TOO_LARGE'))
-  }
-  if (err?.code === 'LIMIT_FILE_COUNT') {
-    return next(new AppError('Too many images (max 1)', 400, 'TOO_MANY_FILES'))
-  }
-  return next(err)
-}

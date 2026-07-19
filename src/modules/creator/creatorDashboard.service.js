@@ -4,23 +4,11 @@ import { Design } from '../designs/design.model.js'
 import { Order } from '../orders/order.model.js'
 import { Devis } from '../devis/devis.model.js'
 import { PointsLedger } from '../points/pointsLedger.model.js'
-import { MILESTONE_SIZE } from '../points/points.constants.js'
+import { getPointsSettings } from '../points/pointsSettings.service.js'
 import { AppError } from '../../utils/AppError.js'
+import { monthKey, buildMonthBuckets } from '../../utils/monthBuckets.js'
 
 const MONTH_WINDOW = 6
-
-function monthKey(date) {
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`
-}
-
-function buildMonthBuckets() {
-  const now = new Date()
-  const buckets = []
-  for (let offset = MONTH_WINDOW - 1; offset >= 0; offset--) {
-    buckets.push(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - offset, 1)))
-  }
-  return buckets
-}
 
 function firstPreviewUrl(design) {
   return design.zones?.find((zone) => zone.previewUrl)?.previewUrl || ''
@@ -45,7 +33,7 @@ export async function getCreatorDashboard(userId) {
   }
 
   const userObjectId = new mongoose.Types.ObjectId(userId)
-  const monthStarts = buildMonthBuckets()
+  const monthStarts = buildMonthBuckets(MONTH_WINDOW)
   const activityStart = monthStarts[0]
 
   const [
@@ -57,6 +45,8 @@ export async function getCreatorDashboard(userId) {
     recentOrderDocs,
     recentLedgerDocs,
     monthlyRows,
+    designIds,
+    pointsSettings,
   ] = await Promise.all([
     User.findById(userId).select('name pointsBalance createdAt').lean(),
     Design.aggregate([
@@ -98,14 +88,18 @@ export async function getCreatorDashboard(userId) {
       },
       { $sort: { _id: 1 } },
     ]),
+    // Uniquement les _id (indexé creator) — les métadonnées du top 5 sont chargées après.
+    Design.find({ creator: userId }).select('_id').lean(),
+    getPointsSettings(),
   ])
 
   if (!user) throw new AppError('User not found', 404, 'USER_NOT_FOUND')
 
-  const designIds = await Design.find({ creator: userId }).select('_id title status zones.previewUrl').lean()
   const designObjectIds = designIds.map((design) => design._id)
 
-  const salesRows = designObjectIds.length
+  // $facet : top 5 + total TOUTES ventes livrées (la progression palier doit
+  // compter tous les designs, pas seulement le top 5).
+  const [salesAgg] = designObjectIds.length
     ? await Order.aggregate([
         { $match: { status: 'delivered', 'items.sourceDesign': { $in: designObjectIds } } },
         { $unwind: '$items' },
@@ -117,17 +111,29 @@ export async function getCreatorDashboard(userId) {
             revenue: { $sum: '$items.lineTotal' },
           },
         },
-        { $sort: { deliveredQty: -1 } },
-        { $limit: 5 },
+        {
+          $facet: {
+            top: [{ $sort: { deliveredQty: -1 } }, { $limit: 5 }],
+            totals: [{ $group: { _id: null, deliveredQty: { $sum: '$deliveredQty' } } }],
+          },
+        },
       ])
-    : []
+    : [{ top: [], totals: [] }]
 
-  const designById = new Map(designIds.map((design) => [design._id.toString(), design]))
-  const totalDeliveredDesignSales = salesRows.reduce((sum, row) => sum + row.deliveredQty, 0)
+  const salesRows = salesAgg.top
+  const totalDeliveredDesignSales = salesAgg.totals[0]?.deliveredQty || 0
+
+  const topDesignDocs = salesRows.length
+    ? await Design.find({ _id: { $in: salesRows.map((row) => row._id) } })
+        .select('title status zones.previewUrl')
+        .lean()
+    : []
+  const designById = new Map(topDesignDocs.map((design) => [design._id.toString(), design]))
+  const { milestoneSize, pointsPerMilestone } = pointsSettings
   const nextMilestoneRemaining =
     totalDeliveredDesignSales === 0
-      ? MILESTONE_SIZE
-      : MILESTONE_SIZE - (totalDeliveredDesignSales % MILESTONE_SIZE || MILESTONE_SIZE)
+      ? milestoneSize
+      : milestoneSize - (totalDeliveredDesignSales % milestoneSize || milestoneSize)
 
   const monthlyByKey = new Map(monthlyRows.map((row) => [row._id, row]))
 
@@ -153,6 +159,8 @@ export async function getCreatorDashboard(userId) {
       marketplaceSales: {
         deliveredQty: totalDeliveredDesignSales,
         nextMilestoneRemaining,
+        milestoneSize,
+        pointsPerMilestone,
       },
     },
     activity: monthStarts.map((date) => {

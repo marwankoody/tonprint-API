@@ -45,6 +45,24 @@ const userSchema = new Schema(
       trim: true,
       maxlength: 30,
     },
+    city: {
+      type: String,
+      default: '',
+      trim: true,
+      maxlength: 80,
+    },
+    address: {
+      type: String,
+      default: '',
+      trim: true,
+      maxlength: 250,
+    },
+    postalCode: {
+      type: String,
+      default: '',
+      trim: true,
+      maxlength: 20,
+    },
     password: {
       type: String,
       required: [true, 'Password is required'],
@@ -80,5 +98,6 @@ const userSchema = new Schema(
 // `unique: true` ci-dessus crée déjà l'index MongoDB sur `email`.
 userSchema.index({ roles: 1, createdAt: -1 })
 userSchema.index({ isActive: 1, createdAt: -1 })
+userSchema.index({ name: 1 })
 
 export const User = model('User', userSchema)

@@ -1,4 +1,7 @@
 import rateLimit from 'express-rate-limit'
+import { env } from '../config/env.js'
+
+const isDev = env.NODE_ENV === 'development'
 
 const commonOptions = {
   standardHeaders: 'draft-7',
@@ -36,11 +39,14 @@ export const refreshLimiter = rateLimit({
 /**
  * Limiteur global appliqué à toute l'API (garde-fou anti-abus/DoS).
  * Les endpoints sensibles (auth) ont en plus leurs propres limiteurs, plus stricts.
+ * Désactivé en dev : HMR + navigation intensive épuisent le quota et
+ * bloquent toute l'API (y compris /login) avec des 429.
  */
 export const apiLimiter = rateLimit({
   ...commonOptions,
   windowMs: 15 * 60 * 1000,
   limit: 300,
+  skip: () => isDev,
 })
 
 /**
@@ -66,4 +72,38 @@ export const designUploadLimiter = rateLimit({
   ...commonOptions,
   windowMs: 15 * 60 * 1000,
   limit: 60,
+})
+
+/**
+ * Connexions SSE notifications : limite les reconnects agressifs.
+ * Une session longue = 1 requête initiale ; le heartbeat ne recompte pas.
+ * Désactivé en dev : StrictMode + HMR + rechargements consomment le quota
+ * très vite et provoquent des 429 en boucle.
+ */
+export const sseStreamLimiter = rateLimit({
+  ...commonOptions,
+  windowMs: 15 * 60 * 1000,
+  limit: 240,
+  skip: () => isDev,
+})
+
+/**
+ * Émission de tickets SSE : même quota que le stream
+ * (chaque reconnect nécessite un nouveau ticket).
+ */
+export const sseTicketLimiter = rateLimit({
+  ...commonOptions,
+  windowMs: 15 * 60 * 1000,
+  limit: 240,
+  skip: () => isDev,
+})
+
+/**
+ * Création de commandes (guest COD inclus) : anti-spam stock / ops.
+ */
+export const orderCreateLimiter = rateLimit({
+  ...commonOptions,
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  skipSuccessfulRequests: false,
 })

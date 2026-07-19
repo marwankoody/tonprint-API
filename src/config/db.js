@@ -10,7 +10,11 @@ const isProd = env.NODE_ENV === 'production'
 export async function connectDB() {
   mongoose.set('strictQuery', true)
 
-  await mongoose.connect(env.MONGODB_URI)
+  await mongoose.connect(env.MONGODB_URI, {
+    maxPoolSize: 20,
+    minPoolSize: 2,
+    serverSelectionTimeoutMS: 5000,
+  })
 
   console.log(`✅ MongoDB connected: ${mongoose.connection.name}`)
   return mongoose
@@ -35,14 +39,16 @@ export async function ensureIndexes() {
     return
   }
 
-  for (const name of models) {
-    const model = mongoose.model(name)
-    if (isProd) {
-      await model.createIndexes()
-    } else {
-      await model.syncIndexes()
-    }
-    const indexes = await model.collection.indexes()
-    console.log(`✅ Indexes synced for "${name}" (${indexes.length})`)
-  }
+  await Promise.all(
+    models.map(async (name) => {
+      const model = mongoose.model(name)
+      if (isProd) {
+        await model.createIndexes()
+      } else {
+        await model.syncIndexes()
+      }
+      const indexes = await model.collection.indexes()
+      console.log(`✅ Indexes synced for "${name}" (${indexes.length})`)
+    })
+  )
 }

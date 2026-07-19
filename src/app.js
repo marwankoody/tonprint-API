@@ -21,6 +21,8 @@ import designAdminRoutes from './modules/designs/design.admin.routes.js'
 import pointsRoutes from './modules/points/points.routes.js'
 import creatorRoutes from './modules/creator/creator.routes.js'
 import contactRoutes from './modules/contact/contact.routes.js'
+import notificationRoutes from './modules/notifications/notification.routes.js'
+import adminRoutes from './modules/admin/admin.routes.js'
 
 const app = express()
 
@@ -32,9 +34,19 @@ if (env.NODE_ENV === 'production') {
 }
 
 // Sécurité — CORP en cross-origin : l'API est appelée depuis www.tonprint.ma
+// CSP API minimal (JSON only) — le CSP SPA est côté frontend / reverse proxy.
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
+    contentSecurityPolicy: {
+      useDefaults: false,
+      directives: {
+        defaultSrc: ["'none'"],
+        frameAncestors: ["'none'"],
+        baseUri: ["'none'"],
+        formAction: ["'none'"],
+      },
+    },
   })
 )
 app.use(
@@ -52,15 +64,31 @@ app.use(
 
 // Parsing
 app.use(express.json({ limit: '1mb' }))
-app.use(express.urlencoded({ extended: true }))
+app.use(express.urlencoded({ extended: true, limit: '1mb' }))
 app.use(cookieParser())
 
-// Performance
-app.use(compression())
+// Performance — ne compresse pas les flux SSE (sinon buffering / latence).
+app.use(
+  compression({
+    filter(req, res) {
+      if (req.path?.includes('/notifications/stream')) return false
+      if (req.headers.accept === 'text/event-stream') return false
+      return compression.filter(req, res)
+    },
+  })
+)
 
-// Logger HTTP — sans données sensibles (pas de body)
+// Logger HTTP — sans données sensibles (pas de body / token SSE)
 if (env.NODE_ENV !== 'test') {
-  app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev'))
+  morgan.token('safe-url', (req) => {
+    const raw = req.originalUrl || req.url || ''
+    return raw
+      .replace(/([?&]access_token=)[^&]*/gi, '$1[REDACTED]')
+      .replace(/([?&]ticket=)[^&]*/gi, '$1[REDACTED]')
+  })
+  app.use(
+    morgan(env.NODE_ENV === 'production' ? ':remote-addr - :remote-user [:date[clf]] ":method :safe-url HTTP/:http-version" :status :res[content-length]' : ':method :safe-url :status :response-time ms')
+  )
 }
 
 // Garde-fou anti-abus/DoS global — les endpoints sensibles ont leurs propres
@@ -77,9 +105,11 @@ app.use('/api/devis', devisRoutes)
 app.use('/api/designs', designsRoutes)
 app.use('/api/admin/designs', designAdminRoutes)
 app.use('/api/admin/users', userAdminRoutes)
+app.use('/api/admin', adminRoutes)
 app.use('/api/points', pointsRoutes)
 app.use('/api/creator', creatorRoutes)
 app.use('/api/contact', contactRoutes)
+app.use('/api/notifications', notificationRoutes)
 
 // 404 + erreurs
 app.use(notFound)

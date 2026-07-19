@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { authenticate, optionalAuth } from '../../middleware/auth.js'
 import { requireRole } from '../../middleware/requireRole.js'
 import { validate } from '../../middleware/validate.js'
+import { orderCreateLimiter } from '../../middleware/rateLimiters.js'
 import {
   createOrderSchema,
   listOrdersQuerySchema,
@@ -14,7 +15,13 @@ import * as orderController from './order.controller.js'
 const router = Router()
 
 /** Création COD — connecté ou invité. */
-router.post('/', optionalAuth, validate(createOrderSchema), orderController.createOrder)
+router.post(
+  '/',
+  orderCreateLimiter,
+  optionalAuth,
+  validate(createOrderSchema),
+  orderController.createOrder
+)
 
 /** Liste des commandes du client connecté. */
 router.get(

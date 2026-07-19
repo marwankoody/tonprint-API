@@ -76,7 +76,10 @@ const devisSchema = new Schema(
 )
 
 devisSchema.index({ status: 1, createdAt: -1 })
+devisSchema.index({ user: 1, status: 1, createdAt: -1 })
 devisSchema.index({ email: 1, createdAt: -1 })
 devisSchema.index({ createdAt: -1 })
+devisSchema.index({ company: 1 })
+devisSchema.index({ contactName: 1 })
 
 export const Devis = model('Devis', devisSchema)

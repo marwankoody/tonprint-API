@@ -5,9 +5,7 @@ import {
   DEVIS_DEADLINES,
   DEVIS_STATUSES,
 } from './devis.model.js'
-
-/** Téléphone marocain : 0XXXXXXXXX, +212XXXXXXXXX, 00212… */
-const moroccoPhoneRegex = /^(?:\+212|00212|0)[5-7]\d{8}$/
+import { normalizeMoroccoPhone, MOROCCO_PHONE_REGEX } from '../../utils/moroccoPhone.js'
 
 const objectIdSchema = z
   .string()
@@ -21,8 +19,8 @@ export const createDevisSchema = z.object({
   phone: z
     .string()
     .trim()
-    .transform((v) => v.replace(/[\s.-]/g, ''))
-    .refine((v) => moroccoPhoneRegex.test(v), {
+    .transform((v) => normalizeMoroccoPhone(v))
+    .refine((v) => MOROCCO_PHONE_REGEX.test(v), {
       message: 'Invalid Moroccan phone number',
     }),
   products: z

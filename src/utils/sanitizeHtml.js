@@ -1,4 +1,5 @@
 import sanitizeHtml from 'sanitize-html'
+import { env } from '../config/env.js'
 
 const ALLOWED_TAGS = [
   'p',
@@ -32,6 +33,18 @@ const ALLOWED_STYLES = {
 }
 
 /**
+ * Autorise uniquement les images hébergées sur notre cloud Cloudinary.
+ * @param {string} src
+ */
+function isAllowedImageSrc(src) {
+  if (!src || typeof src !== 'string') return false
+  const cloud = env.CLOUDINARY_CLOUD_NAME
+  if (!cloud) return false
+  const prefix = `https://res.cloudinary.com/${cloud}/`
+  return src.startsWith(prefix)
+}
+
+/**
  * Sanitize un HTML riche (éditeur Lexical) pour stockage sécurisé — utilisé
  * par tout contenu HTML de confiance-partielle (blog, description produit…)
  * avant persistance et rendu via `dangerouslySetInnerHTML` côté client.
@@ -54,8 +67,17 @@ export function sanitizeRichHtml(html) {
     },
     allowedStyles: ALLOWED_STYLES,
     allowedSchemes: ['http', 'https', 'mailto'],
+    allowedSchemesByTag: {
+      img: ['https'],
+    },
     transformTags: {
       a: sanitizeHtml.simpleTransform('a', { rel: 'noopener noreferrer' }),
+      img(tagName, attribs) {
+        if (!isAllowedImageSrc(attribs.src)) {
+          return { tagName: 'span', text: '', attribs: {} }
+        }
+        return { tagName, attribs }
+      },
     },
   }).trim()
 }

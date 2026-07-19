@@ -2,6 +2,7 @@ import { Readable } from 'node:stream'
 import { cloudinary } from '../config/cloudinary.js'
 import { isCloudinaryConfigured } from '../config/env.js'
 import { AppError } from '../utils/AppError.js'
+import { assertImageBuffer } from '../utils/assertImageBuffer.js'
 
 const PRODUCT_FOLDER = 'tonprint/products'
 const BLOG_FOLDER = 'tonprint/blog'
@@ -33,25 +34,34 @@ function uploadImageToFolder(buffer, folder, originalName = 'image', options = {
   const safeName = originalName.replace(/[^\w.-]/g, '_').slice(0, 80)
 
   return new Promise((resolve, reject) => {
-    const uploadStream = cloudinary.uploader.upload_stream(
-      {
-        folder,
-        resource_type: 'image',
-        public_id: `${safeName}-${Date.now()}`,
-        overwrite: false,
-        // Les fichiers d'impression restent en PNG sans recompression.
-        ...(options.raw ? {} : { transformation: [{ fetch_format: 'webp', quality: 'auto' }] }),
-      },
-      (error, result) => {
-        if (error) return reject(error)
-        resolve({
-          url: result.secure_url,
-          publicId: result.public_id,
-        })
-      }
-    )
+    // Magic-bytes déjà vérifiés en middleware upload ; double-check print PNG.
+    const precede = options.raw
+      ? assertImageBuffer(buffer, { allowOnly: 'image/png' })
+      : Promise.resolve()
 
-    Readable.from(buffer).pipe(uploadStream)
+    precede
+      .then(() => {
+        const uploadStream = cloudinary.uploader.upload_stream(
+          {
+            folder,
+            resource_type: 'image',
+            public_id: `${safeName}-${Date.now()}`,
+            overwrite: false,
+            // Les fichiers d'impression restent en PNG sans recompression.
+            ...(options.raw ? {} : { transformation: [{ fetch_format: 'webp', quality: 'auto' }] }),
+          },
+          (error, result) => {
+            if (error) return reject(error)
+            resolve({
+              url: result.secure_url,
+              publicId: result.public_id,
+            })
+          }
+        )
+
+        Readable.from(buffer).pipe(uploadStream)
+      })
+      .catch(reject)
   })
 }
 
@@ -133,17 +143,4 @@ export async function deleteCloudinaryImages(publicIds) {
       cloudinary.uploader.destroy(publicId, { resource_type: 'image' })
     )
   )
-}
-
-/**
- * Construit une URL Cloudinary optimisée pour l'affichage catalogue/fiche.
- * @param {string} publicId
- * @param {{ width?: number }} [options]
- */
-export function buildProductImageUrl(publicId, options = {}) {
-  const width = options.width ?? 800
-  return cloudinary.url(publicId, {
-    secure: true,
-    transformation: [{ fetch_format: 'webp', quality: 'auto', width }],
-  })
 }

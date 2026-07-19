@@ -27,7 +27,12 @@ const envSchema = z.object({
   CONTACT_SHEETS_SECRET: z.string().optional().default(''),
 })
 
-const parsed = envSchema.safeParse(process.env)
+const parsed = envSchema
+  .refine((data) => data.JWT_ACCESS_SECRET !== data.JWT_REFRESH_SECRET, {
+    message: 'JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be different',
+    path: ['JWT_REFRESH_SECRET'],
+  })
+  .safeParse(process.env)
 
 if (!parsed.success) {
   console.error('❌ Invalid environment variables:')

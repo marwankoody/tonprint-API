@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-export const CONTACT_SUBJECTS = Object.freeze([
+const CONTACT_SUBJECTS = Object.freeze([
   'general',
   'order_support',
   'creators',

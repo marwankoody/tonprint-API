@@ -1,5 +1,11 @@
 import { z } from 'zod'
-import { PRODUCT_CATEGORIES, PRODUCT_CHANNELS, PRINT_ZONES } from './product.model.js'
+import { env } from '../../config/env.js'
+import {
+  PRODUCT_CATEGORIES,
+  PRODUCT_CHANNELS,
+  PRINT_ZONES,
+  PRODUCT_QUALITY_KEYS,
+} from './product.model.js'
 
 const coerceBool = z.preprocess((val) => {
   if (val === 'true' || val === true) return true
@@ -16,29 +22,50 @@ const measurementsSchema = z
   .optional()
 
 const variantSchema = z.object({
-  label: z.string().trim().min(1, 'Variant label is required'),
-  sku: z.string().trim().optional(),
+  label: z.string().trim().min(1, 'Variant label is required').max(80),
+  sku: z.string().trim().max(80).optional(),
   priceDelta: z.coerce.number().default(0),
   stock: z.coerce.number().int().min(0).default(0),
   measurements: measurementsSchema,
 })
 
 const colorSchema = z.object({
-  name: z.string().trim().min(1),
+  name: z.string().trim().min(1).max(80),
   hex: z
     .string()
     .trim()
     .regex(/^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/, 'Invalid color hex'),
 })
 
-/** URLs mockup restreintes à Cloudinary (fichiers uploadés via notre API uniquement). */
+const qualitySchema = z.object({
+  key: z.enum(PRODUCT_QUALITY_KEYS),
+  price: z.coerce.number().min(0, 'Quality price must be >= 0'),
+})
+
+const qualitiesSchema = z
+  .array(qualitySchema)
+  .max(PRODUCT_QUALITY_KEYS.length)
+  .refine((items) => new Set(items.map((q) => q.key)).size === items.length, {
+    message: 'Duplicate quality keys are not allowed',
+  })
+  .optional()
+  .default([])
+
+/** URLs mockup restreintes à notre cloud Cloudinary. */
 const cloudinaryUrlSchema = z
   .string()
   .trim()
   .max(500)
-  .refine((v) => v.startsWith('https://res.cloudinary.com/'), {
-    message: 'Mockup URL must be a Cloudinary URL',
-  })
+  .refine(
+    (v) => {
+      const cloud = env.CLOUDINARY_CLOUD_NAME
+      if (!cloud) return v.startsWith('https://res.cloudinary.com/')
+      return v.startsWith(`https://res.cloudinary.com/${cloud}/`)
+    },
+    {
+      message: 'Mockup URL must be a Cloudinary URL for this project',
+    }
+  )
 
 const printAreaMockupSchema = z.object({
   colorName: z.string().trim().min(1).max(60),
@@ -71,6 +98,14 @@ const printAreasSchema = z
 const channelSchema = z
   .string()
   .refine((val) => PRODUCT_CHANNELS.includes(val), { message: 'Invalid channel' })
+
+/** Params `/:id` — cohérence avec les autres modules (blog, devis…). */
+export const productIdParamSchema = z.object({
+  id: z
+    .string()
+    .trim()
+    .regex(/^[a-fA-F0-9]{24}$/, 'Invalid product id'),
+})
 
 export const listProductsQuerySchema = z.object({
   page: z.coerce.number().int().positive().optional(),
@@ -127,6 +162,7 @@ export const createProductSchema = z.object({
     .nullable(),
   variants: z.array(variantSchema).optional().default([]),
   colors: z.array(colorSchema).optional().default([]),
+  qualities: qualitiesSchema,
   printAreas: printAreasSchema.optional().default([]),
 })
 
@@ -141,7 +177,14 @@ export const updateProductSchema = createProductSchema.partial().extend({
 export function parseMultipartProductBody(body) {
   const parsed = { ...body }
 
-  for (const key of ['variants', 'colors', 'removeImagePublicIds', 'printAreas', 'printTypes']) {
+  for (const key of [
+    'variants',
+    'colors',
+    'qualities',
+    'removeImagePublicIds',
+    'printAreas',
+    'printTypes',
+  ]) {
     if (typeof parsed[key] === 'string' && parsed[key].trim()) {
       try {
         parsed[key] = JSON.parse(parsed[key])

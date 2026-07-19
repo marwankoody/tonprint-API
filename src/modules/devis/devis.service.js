@@ -2,11 +2,7 @@ import mongoose from 'mongoose'
 import { Devis, DEVIS_STATUS_TRANSITIONS } from './devis.model.js'
 import { AppError } from '../../utils/AppError.js'
 import { parsePagination, paginationMeta } from '../../utils/pagination.js'
-
-/** @param {string} value */
-function escapeRegex(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
+import { escapeRegex } from '../../utils/escapeRegex.js'
 
 /** @param {import('mongoose').Document | object} devis */
 function formatDevis(devis) {
@@ -90,7 +86,12 @@ export async function listMyDevis(userId, query) {
   if (query.status) filter.status = query.status
 
   const [items, total] = await Promise.all([
-    Devis.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+    Devis.find(filter)
+      .select('-details -statusHistory')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
     Devis.countDocuments(filter),
   ])
 
@@ -151,7 +152,12 @@ export async function listDevisAdmin(query) {
   }
 
   const [items, total] = await Promise.all([
-    Devis.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+    Devis.find(filter)
+      .select('-details -statusHistory')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
     Devis.countDocuments(filter),
   ])
 

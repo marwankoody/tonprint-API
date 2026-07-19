@@ -78,15 +78,9 @@ export async function submitContactMessage(payload, meta = {}) {
   }
 
   if (data?.ok === false) {
-    const detail = data.message || 'Unable to deliver contact message'
-    console.error('[contact] sheets webhook rejected:', detail, data.hint || '')
-    throw new AppError(
-      detail === 'Unauthorized' || detail === 'Missing secret'
-        ? 'Google Sheets rejected the request (SCRIPT_SECRET must equal CONTACT_SHEETS_SECRET, then redeploy Apps Script)'
-        : detail,
-      502,
-      'CONTACT_DELIVERY_FAILED'
-    )
+    // Détail config uniquement en logs serveur — jamais exposé au client.
+    console.error('[contact] sheets webhook rejected:', data.message || 'unknown', data.hint || '')
+    throw new AppError('Unable to deliver contact message', 502, 'CONTACT_DELIVERY_FAILED')
   }
 
   return { ok: true }

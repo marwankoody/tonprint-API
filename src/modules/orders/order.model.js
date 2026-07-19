@@ -33,6 +33,7 @@ const variantSnapshotSchema = new Schema(
     label: { type: String, trim: true },
     sku: { type: String, trim: true },
     color: { type: String, trim: true },
+    quality: { type: String, trim: true },
   },
   { _id: false }
 )
@@ -127,11 +128,11 @@ const orderSchema = new Schema(
      * Secret one-time-ish pour que l'invité retrouve sa confirmation
      * sans compte (header X-Guest-Token). Jamais exposé en liste admin brute.
      */
+    // Accès toujours par _id puis comparaison timing-safe — pas d'index nécessaire.
     guestAccessToken: {
       type: String,
       default: null,
       select: false,
-      index: true,
     },
     items: {
       type: [orderItemSchema],
@@ -186,6 +187,9 @@ const orderSchema = new Schema(
 
 orderSchema.index({ user: 1, createdAt: -1 })
 orderSchema.index({ user: 1, channel: 1, createdAt: -1 })
+orderSchema.index({ user: 1, status: 1, createdAt: -1 })
+orderSchema.index({ channel: 1, createdAt: -1 })
+orderSchema.index({ channel: 1, status: 1, createdAt: -1 })
 orderSchema.index({ createdAt: -1 })
 orderSchema.index({ status: 1, createdAt: -1 })
 /** Agrégats paliers points : ventes livrées par design marketplace. */

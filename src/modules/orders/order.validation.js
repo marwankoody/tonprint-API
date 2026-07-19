@@ -1,8 +1,7 @@
 import { z } from 'zod'
 import { ORDER_STATUSES, ORDER_CHANNELS } from './order.model.js'
-
-/** Téléphone marocain : 0XXXXXXXXX, +212XXXXXXXXX, 00212… */
-const moroccoPhoneRegex = /^(?:\+212|00212|0)[5-7]\d{8}$/
+import { PRODUCT_QUALITY_KEYS } from '../products/product.model.js'
+import { normalizeMoroccoPhone, MOROCCO_PHONE_REGEX } from '../../utils/moroccoPhone.js'
 
 const objectIdSchema = z
   .string()
@@ -14,6 +13,7 @@ const orderItemInputSchema = z.object({
   quantity: z.coerce.number().int().min(1).max(999),
   variantId: objectIdSchema.optional(),
   color: z.string().trim().max(60).optional(),
+  quality: z.enum(PRODUCT_QUALITY_KEYS).optional(),
   designId: objectIdSchema.optional(),
 })
 
@@ -22,8 +22,8 @@ const deliveryAddressSchema = z.object({
   phone: z
     .string()
     .trim()
-    .transform((v) => v.replace(/[\s.-]/g, ''))
-    .refine((v) => moroccoPhoneRegex.test(v), {
+    .transform((v) => normalizeMoroccoPhone(v))
+    .refine((v) => MOROCCO_PHONE_REGEX.test(v), {
       message: 'Invalid Moroccan phone number',
     }),
   city: z.string().trim().min(2).max(80),

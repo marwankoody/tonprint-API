@@ -36,6 +36,24 @@ export const updateUserProfileSchema = z.object({
     .max(30, 'Phone must be at most 30 characters')
     .optional()
     .default(''),
+  city: z
+    .string()
+    .trim()
+    .max(80, 'City must be at most 80 characters')
+    .optional()
+    .default(''),
+  address: z
+    .string()
+    .trim()
+    .max(250, 'Address must be at most 250 characters')
+    .optional()
+    .default(''),
+  postalCode: z
+    .string()
+    .trim()
+    .max(20, 'Postal code must be at most 20 characters')
+    .optional()
+    .default(''),
 })
 
 export const updateUserRolesSchema = z.object({

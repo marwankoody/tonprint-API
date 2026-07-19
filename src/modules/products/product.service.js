@@ -49,6 +49,7 @@ function formatProduct(product) {
     printTypes: product.printTypes || [],
     variants: product.variants,
     colors: product.colors || [],
+    qualities: product.qualities || [],
     price: product.price,
     compareAtPrice: product.compareAtPrice ?? null,
     wholesalePrice: product.wholesalePrice ?? null,
@@ -68,8 +69,8 @@ function formatProduct(product) {
   }
 }
 
-/** Projection listes : `printAreas` (mockups + zones) inutile hors détail. */
-const LIST_PROJECTION = '-printAreas'
+/** Projection listes : mockups + description HTML inutiles hors détail. */
+const LIST_PROJECTION = '-printAreas -description'
 
 /** Tous les publicIds Cloudinary des mockups d'un produit. */
 function collectMockupPublicIds(printAreas = []) {
@@ -82,10 +83,6 @@ function channelFilter(channel = 'marketplace') {
     return { channel: 'personalization' }
   }
   return { $or: [{ channel: 'marketplace' }, { channel: { $exists: false } }] }
-}
-
-function escapeRegex(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 const SORT_MAP = {
@@ -109,7 +106,9 @@ export async function listProducts(query) {
   }
 
   if (category) filter.category = category
-  if (search) filter.name = { $regex: escapeRegex(search), $options: 'i' }
+  // Index text sur `name` — préférer `$text` à un regex full-scan. explain() en staging.
+  const searchTerm = typeof search === 'string' ? search.trim() : ''
+  if (searchTerm) filter.$text = { $search: searchTerm }
   if (redeemable === true) {
     filter.isPointsRedeemable = true
     filter.pointsCost = { $gt: 0 }
@@ -120,13 +119,17 @@ export async function listProducts(query) {
     if (maxPrice !== undefined) filter.price.$lte = maxPrice
   }
 
+  const sortSpec = searchTerm
+    ? { score: { $meta: 'textScore' }, ...(SORT_MAP[sort] || SORT_MAP.newest) }
+    : SORT_MAP[sort] || SORT_MAP.newest
+
+  let findQuery = Product.find(filter).select(LIST_PROJECTION)
+  if (searchTerm) {
+    findQuery = findQuery.select({ score: { $meta: 'textScore' } })
+  }
+
   const [products, total] = await Promise.all([
-    Product.find(filter)
-      .select(LIST_PROJECTION)
-      .sort(SORT_MAP[sort] || SORT_MAP.newest)
-      .skip(skip)
-      .limit(limit)
-      .lean(),
+    findQuery.sort(sortSpec).skip(skip).limit(limit).lean(),
     Product.countDocuments(filter),
   ])
 
@@ -171,15 +174,19 @@ export async function listProductsAdmin(query) {
   if (category) filter.category = category
   if (channel) Object.assign(filter, channelFilter(channel))
   if (isPublished !== undefined) filter.isPublished = isPublished
-  if (search) filter.name = { $regex: escapeRegex(search), $options: 'i' }
+  const searchTerm = typeof search === 'string' ? search.trim() : ''
+  if (searchTerm) filter.$text = { $search: searchTerm }
+
+  let findQuery = Product.find(filter).select(LIST_PROJECTION)
+  const sortSpec = searchTerm
+    ? { score: { $meta: 'textScore' }, createdAt: -1 }
+    : { createdAt: -1 }
+  if (searchTerm) {
+    findQuery = findQuery.select({ score: { $meta: 'textScore' } })
+  }
 
   const [products, total] = await Promise.all([
-    Product.find(filter)
-      .select(LIST_PROJECTION)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean(),
+    findQuery.sort(sortSpec).skip(skip).limit(limit).lean(),
     Product.countDocuments(filter),
   ])
 

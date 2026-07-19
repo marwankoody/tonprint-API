@@ -97,13 +97,18 @@ async function assertProductAllowsZones(productId, zones) {
  * Charge un design et vérifie qu'il appartient bien à l'utilisateur.
  * @param {string} designId
  * @param {string} userId
+ * @param {{ lean?: boolean, select?: string }} [options]
+ *   `lean: true` pour lectures seules (pas de save/delete) ;
+ *   `select` pour ne pas charger le canvasJson quand il est inutile.
  */
-async function findOwnedDesign(designId, userId) {
+async function findOwnedDesign(designId, userId, options = {}) {
   if (!mongoose.isValidObjectId(designId)) {
     throw new AppError('Invalid design id', 400, 'INVALID_ID')
   }
 
-  const design = await Design.findById(designId)
+  let queryBuilder = Design.findById(designId)
+  if (options.select) queryBuilder = queryBuilder.select(options.select)
+  const design = options.lean ? await queryBuilder.lean() : await queryBuilder
   if (!design) {
     throw new AppError('Design not found', 404, 'DESIGN_NOT_FOUND')
   }
@@ -221,7 +226,7 @@ export async function listMyDesigns(userId, query) {
  * @param {string} userId
  */
 export async function getMyDesignById(designId, userId) {
-  const design = await findOwnedDesign(designId, userId)
+  const design = await findOwnedDesign(designId, userId, { lean: true })
   return formatDesign(design, { includeCanvas: true })
 }
 
@@ -234,7 +239,7 @@ export async function getMyDesignById(designId, userId) {
  * @param {string} userId
  */
 export async function deleteDesign(designId, userId) {
-  const design = await findOwnedDesign(designId, userId)
+  const design = await findOwnedDesign(designId, userId, { select: '-zones.canvasJson' })
   const publicIds = collectAssetPublicIds(design)
 
   await design.deleteOne()
@@ -320,7 +325,7 @@ export async function saveZoneAssets(designId, userId, zone, files) {
  * @param {string} userId
  */
 export async function submitDesign(designId, userId) {
-  const design = await findOwnedDesign(designId, userId)
+  const design = await findOwnedDesign(designId, userId, { select: '-zones.canvasJson' })
 
   if (design.status === 'pending_review') {
     return formatDesign(design)
@@ -352,7 +357,7 @@ export async function submitDesign(designId, userId) {
  * @param {string} userId
  */
 export async function withdrawDesign(designId, userId) {
-  const design = await findOwnedDesign(designId, userId)
+  const design = await findOwnedDesign(designId, userId, { select: '-zones.canvasJson' })
 
   if (design.status === 'approved') {
     throw new AppError('Cannot withdraw an approved design', 400, 'CANNOT_WITHDRAW')
@@ -379,7 +384,7 @@ export async function listAdminDesigns(query = {}) {
 
   const [items, total] = await Promise.all([
     Design.find(filter)
-      .select('-zones.canvasJson -zones.printFilePublicId')
+      .select('-zones.canvasJson -zones.printFileUrl -zones.printFilePublicId')
       .sort({ updatedAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -391,7 +396,7 @@ export async function listAdminDesigns(query = {}) {
 
   return {
     designs: items.map((d) => ({
-      ...formatDesign(d, { includePrintFiles: true }),
+      ...formatDesign(d),
       creator:
         d.creator && typeof d.creator === 'object'
           ? { id: d.creator._id.toString(), name: d.creator.name, email: d.creator.email }
@@ -409,16 +414,19 @@ export async function approveDesign(designId) {
   if (!mongoose.isValidObjectId(designId)) {
     throw new AppError('Invalid design id', 400, 'INVALID_ID')
   }
-  const design = await Design.findById(designId)
-  if (!design) throw new AppError('Design not found', 404, 'DESIGN_NOT_FOUND')
-  if (design.status !== 'pending_review' && design.status !== 'rejected') {
+  // Update conditionnelle (statut vérifié dans le filtre) — ne charge jamais le canvasJson.
+  const design = await Design.findOneAndUpdate(
+    { _id: designId, status: { $in: ['pending_review', 'rejected'] } },
+    { $set: { status: 'approved', licenseGrantedByCreator: true, rejectionReason: '' } },
+    { new: true, projection: { 'zones.canvasJson': 0 } }
+  ).lean()
+
+  if (!design) {
+    const exists = await Design.exists({ _id: designId })
+    if (!exists) throw new AppError('Design not found', 404, 'DESIGN_NOT_FOUND')
     throw new AppError('Design is not awaiting review', 400, 'INVALID_STATUS')
   }
 
-  design.status = 'approved'
-  design.licenseGrantedByCreator = true
-  design.rejectionReason = ''
-  await design.save()
   return formatDesign(design, { includePrintFiles: true })
 }
 
@@ -431,14 +439,17 @@ export async function rejectDesign(designId, reason) {
   if (!mongoose.isValidObjectId(designId)) {
     throw new AppError('Invalid design id', 400, 'INVALID_ID')
   }
-  const design = await Design.findById(designId)
-  if (!design) throw new AppError('Design not found', 404, 'DESIGN_NOT_FOUND')
-  if (design.status !== 'pending_review') {
+  const design = await Design.findOneAndUpdate(
+    { _id: designId, status: 'pending_review' },
+    { $set: { status: 'rejected', rejectionReason: (reason || '').trim().slice(0, 500) } },
+    { new: true, projection: { 'zones.canvasJson': 0 } }
+  ).lean()
+
+  if (!design) {
+    const exists = await Design.exists({ _id: designId })
+    if (!exists) throw new AppError('Design not found', 404, 'DESIGN_NOT_FOUND')
     throw new AppError('Design is not awaiting review', 400, 'INVALID_STATUS')
   }
 
-  design.status = 'rejected'
-  design.rejectionReason = (reason || '').trim().slice(0, 500)
-  await design.save()
   return formatDesign(design, { includePrintFiles: true })
 }

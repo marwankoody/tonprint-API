@@ -2,7 +2,7 @@ import { Router } from 'express'
 import { authenticate } from '../../middleware/auth.js'
 import { requireRole } from '../../middleware/requireRole.js'
 import { validate } from '../../middleware/validate.js'
-import { uploadBlogCover } from '../../middleware/upload.js'
+import { uploadBlogCover, handleUploadErrors } from '../../middleware/upload.js'
 import { AppError } from '../../utils/AppError.js'
 import {
   listBlogQuerySchema,
@@ -48,7 +48,7 @@ router.post(
   requireRole('admin'),
   (req, res, next) => {
     uploadBlogCover(req, res, (err) => {
-      if (err) return blogController.handleUploadErrors(err, req, res, next)
+      if (err) return handleUploadErrors(err, req, res, next)
       try {
         req.body = parseMultipartBlogBody(req.body)
         next()
@@ -68,7 +68,7 @@ router.put(
   validate(blogIdParamSchema, 'params'),
   (req, res, next) => {
     uploadBlogCover(req, res, (err) => {
-      if (err) return blogController.handleUploadErrors(err, req, res, next)
+      if (err) return handleUploadErrors(err, req, res, next)
       try {
         req.body = parseMultipartBlogBody(req.body)
         next()

@@ -8,11 +8,7 @@ import {
   estimateReadingTimeMinutes,
   slugify,
 } from './blog.utils.js'
-
-/** @param {string} value */
-function escapeRegex(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
+import { escapeRegex } from '../../utils/escapeRegex.js'
 
 /**
  * @param {object} raw
@@ -219,15 +215,25 @@ export async function listPublishedPosts(query) {
 
 /**
  * Détail public par slug + locale.
+ * Charge le HTML de la locale demandée + `fr` (fallback), pas les 3 blobs.
  * @param {string} slug
  * @param {string} [locale]
  */
 export async function getPublishedPostBySlug(slug, locale = 'fr') {
-  const post = await BlogPost.findOne({ slug, isPublished: true }).lean()
+  const lang = BLOG_LOCALES.includes(locale) ? locale : 'fr'
+  /** Toujours garder `fr` pour le fallback ; exclure les autres contenus HTML. */
+  const contentProjection =
+    lang === 'fr'
+      ? '-locales.en.content -locales.ar.content -content'
+      : lang === 'en'
+        ? '-locales.ar.content -content'
+        : '-locales.en.content -content'
+
+  const post = await BlogPost.findOne({ slug, isPublished: true }).select(contentProjection).lean()
   if (!post) {
     throw new AppError('Post not found', 404, 'POST_NOT_FOUND')
   }
-  return formatBlogPublic(post, locale, { includeContent: true })
+  return formatBlogPublic(post, lang, { includeContent: true })
 }
 
 /**

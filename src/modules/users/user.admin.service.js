@@ -3,11 +3,7 @@ import { User, normalizeRoles } from '../auth/user.model.js'
 import { Order } from '../orders/order.model.js'
 import { AppError } from '../../utils/AppError.js'
 import { parsePagination, paginationMeta } from '../../utils/pagination.js'
-
-/** @param {string} value */
-function escapeRegex(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
+import { escapeRegex } from '../../utils/escapeRegex.js'
 
 /**
  * @param {import('mongoose').Document | object} user
@@ -19,6 +15,9 @@ function formatAdminUser(user, extra = {}) {
     name: user.name,
     email: user.email,
     phone: user.phone || '',
+    city: user.city || '',
+    address: user.address || '',
+    postalCode: user.postalCode || '',
     roles: normalizeRoles(user.roles),
     pointsBalance: user.pointsBalance ?? 0,
     isActive: user.isActive !== false,
@@ -68,11 +67,16 @@ export async function listUsers(query) {
 
   if (query.q) {
     const regex = { $regex: escapeRegex(String(query.q).trim()), $options: 'i' }
-    filter.$or = [{ name: regex }, { email: regex }, { phone: regex }]
+    filter.$or = [{ name: regex }, { email: regex }, { phone: regex }, { city: regex }]
   }
 
   const [users, total] = await Promise.all([
-    User.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+    User.find(filter)
+      .select('name email phone city roles pointsBalance isActive createdAt updatedAt')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
     User.countDocuments(filter),
   ])
 
@@ -90,18 +94,20 @@ export async function getUserById(userId) {
     throw new AppError('Invalid user id', 400, 'INVALID_ID')
   }
 
-  const user = await User.findById(userId).lean()
+  const [user, ordersCount] = await Promise.all([
+    User.findById(userId).lean(),
+    Order.countDocuments({ user: userId }),
+  ])
   if (!user) {
     throw new AppError('User not found', 404, 'USER_NOT_FOUND')
   }
 
-  const ordersCount = await Order.countDocuments({ user: userId })
   return formatAdminUser(user, { ordersCount })
 }
 
 /**
  * @param {string} userId
- * @param {{ name: string, email: string, phone?: string }} data
+ * @param {{ name: string, email: string, phone?: string, city?: string, address?: string, postalCode?: string }} data
  */
 export async function updateUserProfile(userId, data) {
   if (!mongoose.isValidObjectId(userId)) {
@@ -115,7 +121,16 @@ export async function updateUserProfile(userId, data) {
 
   const user = await User.findByIdAndUpdate(
     userId,
-    { $set: { name: data.name, email: data.email, phone: data.phone || '' } },
+    {
+      $set: {
+        name: data.name,
+        email: data.email,
+        phone: data.phone || '',
+        city: data.city || '',
+        address: data.address || '',
+        postalCode: data.postalCode || '',
+      },
+    },
     { returnDocument: 'after', runValidators: true }
   ).lean()
 

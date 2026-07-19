@@ -1,7 +1,6 @@
-import jwt from 'jsonwebtoken'
-import { env } from '../config/env.js'
 import { AppError } from '../utils/AppError.js'
 import { asyncHandler } from './errorHandler.js'
+import { verifyAccessToken } from '../utils/jwt.js'
 import { normalizeRoles } from '../modules/auth/user.model.js'
 
 /**
@@ -19,7 +18,7 @@ export const authenticate = asyncHandler(async (req, _res, next) => {
   const token = header.slice(7)
 
   try {
-    const payload = jwt.verify(token, env.JWT_ACCESS_SECRET)
+    const payload = verifyAccessToken(token)
     req.user = {
       id: payload.sub,
       roles: normalizeRoles(payload.roles || []),
@@ -47,7 +46,7 @@ export const optionalAuth = asyncHandler(async (req, _res, next) => {
   const token = header.slice(7)
 
   try {
-    const payload = jwt.verify(token, env.JWT_ACCESS_SECRET)
+    const payload = verifyAccessToken(token)
     req.user = {
       id: payload.sub,
       roles: normalizeRoles(payload.roles || []),

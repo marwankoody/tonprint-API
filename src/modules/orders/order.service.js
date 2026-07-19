@@ -6,16 +6,25 @@ import { Design } from '../designs/design.model.js'
 import { User } from '../auth/user.model.js'
 import { AppError } from '../../utils/AppError.js'
 import { parsePagination, paginationMeta } from '../../utils/pagination.js'
+import { escapeRegex } from '../../utils/escapeRegex.js'
 
-/** @param {string} value */
-function escapeRegex(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+/**
+ * Comparaison timing-safe de deux strings (guest tokens).
+ * @param {string} a
+ * @param {string} b
+ */
+function safeEqualStrings(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false
+  const bufA = Buffer.from(a)
+  const bufB = Buffer.from(b)
+  if (bufA.length !== bufB.length) return false
+  return crypto.timingSafeEqual(bufA, bufB)
 }
 
 /**
  * @param {import('mongoose').Document | object} order
  * @param {string | null} [userId]
- * @param {{ includeGuestToken?: boolean, includePrintFiles?: boolean }} [options]
+ * @param {{ includeGuestToken?: boolean, includePrintFiles?: boolean, listMode?: boolean }} [options]
  */
 function formatOrder(order, userId, options = {}) {
   const resolvedUserId =
@@ -25,34 +34,42 @@ function formatOrder(order, userId, options = {}) {
         ? order.user._id.toString()
         : (order.user?.toString?.() ?? order.user ?? null)
 
+  const listMode = Boolean(options.listMode)
+
   const formatted = {
     id: order._id.toString(),
     user: resolvedUserId,
     isGuest: !resolvedUserId,
-    items: (order.items || []).map((item) => ({
-      id: item._id?.toString?.(),
-      product: item.product?.toString?.() ?? item.product,
-      design: item.design ? item.design.toString() : null,
-      sourceDesign: item.sourceDesign ? item.sourceDesign.toString() : null,
-      designSnapshot: item.designSnapshot
-        ? {
-            title: item.designSnapshot.title || '',
-            zones: (item.designSnapshot.zones || []).map((zone) => ({
-              zone: zone.zone,
-              previewUrl: zone.previewUrl || '',
-              ...(options.includePrintFiles ? { printFileUrl: zone.printFileUrl || '' } : {}),
-            })),
-          }
-        : null,
-      name: item.name,
-      image: item.image || '',
-      quantity: item.quantity,
-      unitPrice: item.unitPrice,
-      lineTotal: item.lineTotal,
-      unitPoints: item.unitPoints || 0,
-      linePoints: item.linePoints || 0,
-      variant: item.variant || null,
-    })),
+    items: (order.items || []).map((item) => {
+      const base = {
+        id: item._id?.toString?.(),
+        product: item.product?.toString?.() ?? item.product,
+        design: item.design ? item.design.toString() : null,
+        sourceDesign: item.sourceDesign ? item.sourceDesign.toString() : null,
+        name: item.name,
+        image: item.image || '',
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        lineTotal: item.lineTotal,
+        unitPoints: item.unitPoints || 0,
+        linePoints: item.linePoints || 0,
+        variant: item.variant || null,
+      }
+      if (listMode) return base
+      return {
+        ...base,
+        designSnapshot: item.designSnapshot
+          ? {
+              title: item.designSnapshot.title || '',
+              zones: (item.designSnapshot.zones || []).map((zone) => ({
+                zone: zone.zone,
+                previewUrl: zone.previewUrl || '',
+                ...(options.includePrintFiles ? { printFileUrl: zone.printFileUrl || '' } : {}),
+              })),
+            }
+          : null,
+      }
+    }),
     totalPrice: order.totalPrice,
     pointsSpent: order.pointsSpent || 0,
     status: order.status,
@@ -60,14 +77,17 @@ function formatOrder(order, userId, options = {}) {
     deliveryAddress: order.deliveryAddress,
     paymentMethod: order.paymentMethod || 'cod',
     cancelledAt: order.cancelledAt,
-    statusHistory: (order.statusHistory || []).map((h) => ({
+    createdAt: order.createdAt,
+    updatedAt: order.updatedAt,
+  }
+
+  if (!listMode) {
+    formatted.statusHistory = (order.statusHistory || []).map((h) => ({
       from: h.from,
       to: h.to,
       at: h.at,
       by: h.by?.toString?.() ?? h.by,
-    })),
-    createdAt: order.createdAt,
-    updatedAt: order.updatedAt,
+    }))
   }
 
   if (options.includeGuestToken && order.guestAccessToken) {
@@ -80,8 +100,9 @@ function formatOrder(order, userId, options = {}) {
 /**
  * Format admin : commande + snapshot client (après populate).
  * @param {object} order
+ * @param {{ includePrintFiles?: boolean, listMode?: boolean }} [options]
  */
-function formatOrderAdmin(order) {
+function formatOrderAdmin(order, options = {}) {
   const userDoc = order.user
   const userId =
     userDoc && typeof userDoc === 'object' && userDoc._id
@@ -106,18 +127,35 @@ function formatOrderAdmin(order) {
         }
 
   return {
-    ...formatOrder(order, userId, { includePrintFiles: true }),
+    ...formatOrder(order, userId, {
+      includePrintFiles: options.includePrintFiles ?? true,
+      listMode: options.listMode,
+    }),
     customer,
   }
 }
 
 /**
- * Prix unitaire serveur : gros si qty ≥ MOQ, sinon prix détail + delta variante.
+ * Prix de base : prix de la qualité choisie, sinon prix produit.
+ * @param {object} product
+ * @param {string} [qualityKey]
+ */
+function resolveBasePrice(product, qualityKey) {
+  if (qualityKey && product.qualities?.length) {
+    const quality = product.qualities.find((q) => q.key === qualityKey)
+    if (quality) return quality.price
+  }
+  return product.price
+}
+
+/**
+ * Prix unitaire serveur : gros si qty ≥ MOQ, sinon prix (qualité) + delta variante.
  * @param {object} product
  * @param {number} quantity
  * @param {object} [variant]
+ * @param {string} [qualityKey]
  */
-function resolveUnitPrice(product, quantity, variant) {
+function resolveUnitPrice(product, quantity, variant, qualityKey) {
   const hasWholesale =
     product.wholesalePrice != null &&
     product.wholesalePrice > 0 &&
@@ -126,7 +164,7 @@ function resolveUnitPrice(product, quantity, variant) {
   if (hasWholesale) return product.wholesalePrice
 
   const delta = variant?.priceDelta || 0
-  return product.price + delta
+  return resolveBasePrice(product, qualityKey) + delta
 }
 
 /**
@@ -150,7 +188,10 @@ async function resolveDesignsForOrder(inputItems, userId) {
     throw new AppError('Authentication required to order a custom design', 401, 'UNAUTHORIZED')
   }
 
-  const designs = await Design.find({ _id: { $in: designIds } }).lean()
+  // Projection : le canvasJson (gros Mixed) est inutile pour valider une commande.
+  const designs = await Design.find({ _id: { $in: designIds } })
+    .select('creator product title variant status zones.zone zones.previewUrl zones.printFileUrl')
+    .lean()
   const designMap = new Map(designs.map((d) => [d._id.toString(), d]))
 
   for (const input of inputItems) {
@@ -198,21 +239,27 @@ async function decrementStock(productId, quantity) {
 
 /**
  * Restaure le stock après annulation (popularity bornée à ≥ 0).
+ * Une seule update atomique par produit (pipeline $add / $max).
  * @param {{ product: string|object, quantity: number }[]} items
  */
 async function restoreStock(items) {
   await Promise.all(
-    items.map(async (item) => {
+    items.map((item) => {
       const productId = item.product?.toString?.() ?? item.product
-      await Product.updateOne({ _id: productId }, { $inc: { stock: item.quantity } })
-
-      const dec = await Product.updateOne(
-        { _id: productId, popularity: { $gte: item.quantity } },
-        { $inc: { popularity: -item.quantity } }
+      return Product.updateOne(
+        { _id: productId },
+        [
+          {
+            $set: {
+              stock: { $add: ['$stock', item.quantity] },
+              popularity: {
+                $max: [0, { $subtract: [{ $ifNull: ['$popularity', 0] }, item.quantity] }],
+              },
+            },
+          },
+        ],
+        { updatePipeline: true }
       )
-      if (dec.modifiedCount === 0) {
-        await Product.updateOne({ _id: productId }, { $set: { popularity: 0 } })
-      }
     })
   )
 }
@@ -241,10 +288,13 @@ export async function createOrder(userId, payload) {
 
   const designMap = await resolveDesignsForOrder(inputItems, userId)
   const productIds = [...new Set(inputItems.map((i) => i.productId))]
+  // Projection : description HTML et printAreas inutiles pour le pricing.
   const products = await Product.find({
     _id: { $in: productIds },
     isPublished: true,
-  }).lean()
+  })
+    .select('name channel price wholesalePrice wholesaleMoq qualities variants images sourceDesign')
+    .lean()
 
   const productMap = new Map(products.map((p) => [p._id.toString(), p]))
 
@@ -286,7 +336,29 @@ export async function createOrder(userId, payload) {
       variant = product.variants?.find((v) => v.label === design.variant.size) || null
     }
 
-    const unitPrice = resolveUnitPrice(product, input.quantity, variant)
+    const productQualities = product.qualities || []
+    let qualityKey = input.quality || design?.variant?.quality || undefined
+    if (productQualities.length > 0) {
+      if (!qualityKey) {
+        throw new AppError(
+          `Quality is required for product ${product.name}`,
+          400,
+          'QUALITY_REQUIRED'
+        )
+      }
+      const quality = productQualities.find((q) => q.key === qualityKey)
+      if (!quality) {
+        throw new AppError(
+          `Quality "${qualityKey}" is not available for product ${product.name}`,
+          400,
+          'QUALITY_NOT_FOUND'
+        )
+      }
+    } else {
+      qualityKey = undefined
+    }
+
+    const unitPrice = resolveUnitPrice(product, input.quantity, variant, qualityKey)
     const lineTotal = unitPrice * input.quantity
     const color = design?.variant?.colorName || input.color || undefined
     const designPreview = design?.zones?.find((zone) => zone.previewUrl)?.previewUrl || ''
@@ -301,11 +373,12 @@ export async function createOrder(userId, payload) {
         }
       : null
     const variantSnapshot =
-      variant || color
+      variant || color || qualityKey
         ? {
             label: variant?.label || design?.variant?.size || undefined,
             sku: variant?.sku,
             color,
+            quality: qualityKey,
           }
         : undefined
 
@@ -334,10 +407,16 @@ export async function createOrder(userId, payload) {
   const decremented = []
 
   try {
-    for (const [productId, quantity] of qtyByProduct) {
-      await decrementStock(productId, quantity)
-      decremented.push({ productId, quantity })
-    }
+    // Décréments en parallèle — chaque succès est enregistré pour compensation
+    // même si un autre produit échoue (Promise.allSettled + re-throw).
+    const settled = await Promise.allSettled(
+      [...qtyByProduct].map(async ([productId, quantity]) => {
+        await decrementStock(productId, quantity)
+        decremented.push({ productId, quantity })
+      })
+    )
+    const failure = settled.find((r) => r.status === 'rejected')
+    if (failure) throw failure.reason
 
     const totalPrice = preparedItems.reduce((sum, item) => sum + item.lineTotal, 0)
 
@@ -369,6 +448,11 @@ export async function createOrder(userId, payload) {
       ],
     })
 
+    const { emitNotification, notifyAdminsOrderCreated } = await import(
+      '../notifications/notification.service.js'
+    )
+    emitNotification(() => notifyAdminsOrderCreated(order), 'order_created')
+
     return formatOrder(order, userId || null, { includeGuestToken: isGuest })
   } catch (err) {
     await compensateStock(decremented)
@@ -382,7 +466,7 @@ export async function createOrder(userId, payload) {
  * @param {object} query
  */
 export async function listMyOrders(userId, query) {
-  const { page, limit, skip } = parsePagination(query, { maxLimit: 20, defaultLimit: 10 })
+  const { page, limit, skip } = parsePagination(query, { maxLimit: 20, defaultLimit: 15 })
   const filter = { user: userId }
 
   if (query.status) filter.status = query.status
@@ -400,12 +484,17 @@ export async function listMyOrders(userId, query) {
   }
 
   const [orders, total] = await Promise.all([
-    Order.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+    Order.find(filter)
+      .select('-statusHistory -items.designSnapshot')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
     Order.countDocuments(filter),
   ])
 
   return {
-    orders: orders.map(formatOrder),
+    orders: orders.map((o) => formatOrder(o, userId, { listMode: true })),
     pagination: paginationMeta({ page, limit, total }),
   }
 }
@@ -415,7 +504,7 @@ export async function listMyOrders(userId, query) {
  * @param {object} query
  */
 export async function listOrdersAdmin(query) {
-  const { page, limit, skip } = parsePagination(query, { maxLimit: 50, defaultLimit: 20 })
+  const { page, limit, skip } = parsePagination(query, { maxLimit: 50, defaultLimit: 15 })
   const filter = {}
   const and = []
 
@@ -460,6 +549,7 @@ export async function listOrdersAdmin(query) {
       $or: [{ email: regex }, { name: regex }],
     })
       .select('_id')
+      .limit(50)
       .lean()
 
     if (matchingUsers.length) {
@@ -477,6 +567,7 @@ export async function listOrdersAdmin(query) {
 
   const [orders, total] = await Promise.all([
     Order.find(filter)
+      .select('-statusHistory -items.designSnapshot')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
@@ -486,7 +577,7 @@ export async function listOrdersAdmin(query) {
   ])
 
   return {
-    orders: orders.map(formatOrderAdmin),
+    orders: orders.map((o) => formatOrderAdmin(o, { listMode: true, includePrintFiles: false })),
     pagination: paginationMeta({ page, limit, total }),
   }
 }
@@ -531,7 +622,7 @@ export async function getOrderById(orderId, user, guestToken) {
     !orderUserId &&
     Boolean(guestToken) &&
     Boolean(order.guestAccessToken) &&
-    guestToken === order.guestAccessToken
+    safeEqualStrings(guestToken, order.guestAccessToken)
 
   if (!isAdmin && !isOwner && !isGuestOk) {
     if (!user && !guestToken) {
@@ -636,11 +727,20 @@ export async function updateOrderStatus(orderId, nextStatus, adminId) {
   })
   await order.save()
 
-  // Points : paliers uniquement sur ventes réellement livrées.
+  // Sécurité points : credits paliers UNIQUEMENT ici, au passage admin → delivered.
+  // Aucun endpoint client ne peut déclencher awardMilestonesForDeliveredOrder.
   if (nextStatus === 'delivered') {
     const { awardMilestonesForDeliveredOrder } = await import('../points/points.service.js')
     await awardMilestonesForDeliveredOrder(order)
   }
+
+  const { emitNotification, notifyClientOrderStatusChanged } = await import(
+    '../notifications/notification.service.js'
+  )
+  emitNotification(
+    () => notifyClientOrderStatusChanged(order, previous, nextStatus),
+    'order_status_changed'
+  )
 
   return formatOrder(order)
 }

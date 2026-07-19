@@ -1,6 +1,6 @@
 /**
- * Règles métier du programme de fidélité TonPrint.
- * Aligné sur le copy marketing : +50 pts à chaque palier de 10 ventes livrées.
+ * Défauts du programme de fidélité TonPrint (utilisés à l'upsert Settings).
+ * Les valeurs actives sont en DB (`PointsSettings`) et éditables via admin.
  */
 export const MILESTONE_SIZE = 10
 export const POINTS_PER_MILESTONE = 50
