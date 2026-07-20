@@ -23,6 +23,7 @@ import creatorRoutes from './modules/creator/creator.routes.js'
 import contactRoutes from './modules/contact/contact.routes.js'
 import notificationRoutes from './modules/notifications/notification.routes.js'
 import adminRoutes from './modules/admin/admin.routes.js'
+import adminMediaRoutes from './modules/admin/adminMedia.routes.js'
 
 const app = express()
 
@@ -105,6 +106,7 @@ app.use('/api/devis', devisRoutes)
 app.use('/api/designs', designsRoutes)
 app.use('/api/admin/designs', designAdminRoutes)
 app.use('/api/admin/users', userAdminRoutes)
+app.use('/api/admin/media', adminMediaRoutes)
 app.use('/api/admin', adminRoutes)
 app.use('/api/points', pointsRoutes)
 app.use('/api/creator', creatorRoutes)

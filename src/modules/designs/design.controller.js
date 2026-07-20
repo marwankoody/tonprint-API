@@ -57,6 +57,12 @@ export const listAdminDesigns = asyncHandler(async (req, res) => {
   res.status(200).json({ success: true, data: result })
 })
 
+export const getAdminDesign = asyncHandler(async (req, res) => {
+  const { id } = req.validatedParams ?? req.params
+  const design = await designService.getAdminDesignById(id)
+  res.status(200).json({ success: true, data: { design } })
+})
+
 export const approveDesign = asyncHandler(async (req, res) => {
   const { id } = req.validatedParams ?? req.params
   const design = await designService.approveDesign(id)

@@ -190,7 +190,7 @@ async function resolveDesignsForOrder(inputItems, userId) {
 
   // Projection : le canvasJson (gros Mixed) est inutile pour valider une commande.
   const designs = await Design.find({ _id: { $in: designIds } })
-    .select('creator product title variant status zones.zone zones.previewUrl zones.printFileUrl')
+    .select('creator product title variant zones.zone zones.previewUrl zones.printFileUrl')
     .lean()
   const designMap = new Map(designs.map((d) => [d._id.toString(), d]))
 
@@ -293,7 +293,9 @@ export async function createOrder(userId, payload) {
     _id: { $in: productIds },
     isPublished: true,
   })
-    .select('name channel price wholesalePrice wholesaleMoq qualities variants images sourceDesign')
+    .select(
+      'name channel price wholesalePrice wholesaleMoq qualities variants images sourceDesign colors'
+    )
     .lean()
 
   const productMap = new Map(products.map((p) => [p._id.toString(), p]))
@@ -361,6 +363,12 @@ export async function createOrder(userId, payload) {
     const unitPrice = resolveUnitPrice(product, input.quantity, variant, qualityKey)
     const lineTotal = unitPrice * input.quantity
     const color = design?.variant?.colorName || input.color || undefined
+    const colorHexFromDesign = design?.variant?.colorHex || ''
+    const colorHexFromProduct =
+      color && Array.isArray(product.colors)
+        ? product.colors.find((c) => c.name === color)?.hex || ''
+        : ''
+    const colorHex = colorHexFromDesign || colorHexFromProduct || ''
     const designPreview = design?.zones?.find((zone) => zone.previewUrl)?.previewUrl || ''
     const designSnapshot = design
       ? {
@@ -378,6 +386,7 @@ export async function createOrder(userId, payload) {
             label: variant?.label || design?.variant?.size || undefined,
             sku: variant?.sku,
             color,
+            colorHex: colorHex || undefined,
             quality: qualityKey,
           }
         : undefined

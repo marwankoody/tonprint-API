@@ -21,7 +21,7 @@ async function resolveSourceDesignFields(data) {
     return { ...data, sourceDesign: null, creator: null }
   }
 
-  const design = await Design.findById(data.sourceDesign).select('creator licenseGrantedByCreator status').lean()
+  const design = await Design.findById(data.sourceDesign).select('creator licenseGrantedByCreator').lean()
   if (!design) {
     throw new AppError('Source design not found', 404, 'DESIGN_NOT_FOUND')
   }

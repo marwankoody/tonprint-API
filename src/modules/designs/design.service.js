@@ -374,6 +374,49 @@ export async function withdrawDesign(designId, userId) {
 }
 
 /**
+ * Formate un design pour l'admin (créateur peuplé + fichiers d'impression).
+ * @param {object} design — lean, creator/product éventuellement peuplés
+ */
+function formatAdminDesign(design) {
+  const formatted = formatDesign(design, { includePrintFiles: true })
+  return {
+    ...formatted,
+    creator:
+      design.creator && typeof design.creator === 'object' && design.creator._id
+        ? {
+            id: design.creator._id.toString(),
+            name: design.creator.name || '',
+            email: design.creator.email || '',
+            phone: design.creator.phone || '',
+          }
+        : formatted.creator,
+  }
+}
+
+/**
+ * Détail admin d'un design (demande de publication) : client, produit, zones,
+ * mockups + PNG d'impression. Sans `canvasJson` (trop lourd / inutile en revue).
+ * @param {string} designId
+ */
+export async function getAdminDesignById(designId) {
+  if (!mongoose.isValidObjectId(designId)) {
+    throw new AppError('Invalid design id', 400, 'INVALID_ID')
+  }
+
+  const design = await Design.findById(designId)
+    .select('-zones.canvasJson')
+    .populate('product', 'name category price channel')
+    .populate('creator', 'name email phone')
+    .lean()
+
+  if (!design) {
+    throw new AppError('Design not found', 404, 'DESIGN_NOT_FOUND')
+  }
+
+  return formatAdminDesign(design)
+}
+
+/**
  * Liste admin des designs en attente (ou filtrés par statut).
  * @param {{ page?: number, limit?: number, status?: string }} query
  */
@@ -398,8 +441,12 @@ export async function listAdminDesigns(query = {}) {
     designs: items.map((d) => ({
       ...formatDesign(d),
       creator:
-        d.creator && typeof d.creator === 'object'
-          ? { id: d.creator._id.toString(), name: d.creator.name, email: d.creator.email }
+        d.creator && typeof d.creator === 'object' && d.creator._id
+          ? {
+              id: d.creator._id.toString(),
+              name: d.creator.name || '',
+              email: d.creator.email || '',
+            }
           : d.creator?.toString?.() ?? d.creator,
     })),
     pagination: paginationMeta({ page, limit, total }),

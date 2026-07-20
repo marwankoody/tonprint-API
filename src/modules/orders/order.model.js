@@ -33,6 +33,8 @@ const variantSnapshotSchema = new Schema(
     label: { type: String, trim: true },
     sku: { type: String, trim: true },
     color: { type: String, trim: true },
+    /** Hex de la couleur (snapshot) pour affichage admin / atelier. */
+    colorHex: { type: String, trim: true, maxlength: 7, default: '' },
     quality: { type: String, trim: true },
   },
   { _id: false }

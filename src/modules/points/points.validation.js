@@ -32,6 +32,7 @@ export const redeemSchema = z.object({
   productId: objectIdSchema,
   quantity: z.coerce.number().int().min(1).max(20).optional().default(1),
   variantId: objectIdSchema.optional(),
+  color: z.string().trim().max(60).optional(),
   quality: z.enum(PRODUCT_QUALITY_KEYS).optional(),
   deliveryAddress: deliveryAddressSchema,
 })

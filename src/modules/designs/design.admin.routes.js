@@ -19,6 +19,12 @@ router.get(
   designController.listAdminDesigns
 )
 
+router.get(
+  '/:id',
+  validate(designIdParamSchema, 'params'),
+  designController.getAdminDesign
+)
+
 router.post(
   '/:id/approve',
   validate(designIdParamSchema, 'params'),

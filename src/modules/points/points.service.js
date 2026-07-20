@@ -206,7 +206,7 @@ async function countDeliveredSalesForDesign(designId) {
 async function checkAndAwardMilestone(designId) {
   if (!mongoose.isValidObjectId(designId)) return { awarded: 0, sales: 0 }
 
-  const design = await Design.findById(designId).select('creator licenseGrantedByCreator status').lean()
+  const design = await Design.findById(designId).select('creator licenseGrantedByCreator').lean()
   if (!design?.licenseGrantedByCreator) return { awarded: 0, sales: 0 }
   if (!design.creator) return { awarded: 0, sales: 0 }
 
@@ -267,7 +267,7 @@ export async function awardMilestonesForDeliveredOrder(order) {
 /**
  * Échange de points contre un produit marketplace (commande points, total 0 MAD).
  * @param {string} userId
- * @param {{ productId: string, quantity?: number, variantId?: string, deliveryAddress: object }} payload
+ * @param {{ productId: string, quantity?: number, variantId?: string, color?: string, quality?: string, deliveryAddress: object }} payload
  */
 export async function redeemProduct(userId, payload) {
   const quantity = payload.quantity || 1
@@ -306,6 +306,22 @@ export async function redeemProduct(userId, payload) {
     }
   } else {
     qualityKey = undefined
+  }
+
+  const productColors = product.colors || []
+  let color = typeof payload.color === 'string' ? payload.color.trim() : ''
+  let colorHex = ''
+  if (productColors.length > 0) {
+    if (!color) {
+      throw new AppError('Color is required for this product', 400, 'COLOR_REQUIRED')
+    }
+    const matchedColor = productColors.find((c) => c.name === color)
+    if (!matchedColor) {
+      throw new AppError('Color not available for this product', 400, 'COLOR_NOT_FOUND')
+    }
+    colorHex = matchedColor.hex || ''
+  } else {
+    color = ''
   }
 
   const pointsRequired = product.pointsCost * quantity
@@ -366,8 +382,14 @@ export async function redeemProduct(userId, payload) {
           lineTotal: 0,
           unitPoints,
           linePoints: pointsRequired,
-          variant: variant || qualityKey
-            ? { label: variant?.label, sku: variant?.sku, color: undefined, quality: qualityKey }
+          variant: variant || color || qualityKey
+            ? {
+                label: variant?.label,
+                sku: variant?.sku,
+                color: color || undefined,
+                colorHex: colorHex || undefined,
+                quality: qualityKey,
+              }
             : undefined,
         },
       ],
