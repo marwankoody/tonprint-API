@@ -43,6 +43,7 @@ function formatProduct(product) {
     id: product._id.toString(),
     name: product.name,
     category: product.category,
+    subcategory: product.subcategory,
     channel: product.channel || 'marketplace',
     description: product.description,
     printType: product.printType || '',
@@ -97,7 +98,7 @@ const SORT_MAP = {
  */
 export async function listProducts(query) {
   const { page, limit, skip } = parsePagination(query, { maxLimit: 20, defaultLimit: 12 })
-  const { category, minPrice, maxPrice, sort = 'newest', channel = 'marketplace', search, redeemable } =
+  const { category, subcategory, minPrice, maxPrice, sort = 'newest', channel = 'marketplace', search, redeemable } =
     query
 
   const filter = {
@@ -106,6 +107,7 @@ export async function listProducts(query) {
   }
 
   if (category) filter.category = category
+  if (subcategory) filter.subcategory = subcategory
   // Index text sur `name` — préférer `$text` à un regex full-scan. explain() en staging.
   const searchTerm = typeof search === 'string' ? search.trim() : ''
   if (searchTerm) filter.$text = { $search: searchTerm }
@@ -168,10 +170,11 @@ export async function getProductById(id, options = {}) {
  */
 export async function listProductsAdmin(query) {
   const { page, limit, skip } = parsePagination(query, { maxLimit: 50, defaultLimit: 20 })
-  const { search, category, isPublished, channel } = query
+  const { search, category, subcategory, isPublished, channel } = query
 
   const filter = {}
   if (category) filter.category = category
+  if (subcategory) filter.subcategory = subcategory
   if (channel) Object.assign(filter, channelFilter(channel))
   if (isPublished !== undefined) filter.isPublished = isPublished
   const searchTerm = typeof search === 'string' ? search.trim() : ''

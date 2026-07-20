@@ -32,6 +32,7 @@ function formatDesign(design, options = {}) {
           id: design.product._id.toString(),
           name: design.product.name,
           category: design.product.category,
+          subcategory: design.product.subcategory,
           price: design.product.price,
         }
       : productId
@@ -209,7 +210,7 @@ export async function listMyDesigns(userId, query) {
       .sort({ updatedAt: -1 })
       .skip(skip)
       .limit(limit)
-      .populate('product', 'name category price')
+      .populate('product', 'name category subcategory price')
       .lean(),
     Design.countDocuments(filter),
   ])
@@ -405,7 +406,7 @@ export async function getAdminDesignById(designId) {
 
   const design = await Design.findById(designId)
     .select('-zones.canvasJson')
-    .populate('product', 'name category price channel')
+    .populate('product', 'name category subcategory price channel')
     .populate('creator', 'name email phone')
     .lean()
 
@@ -431,7 +432,7 @@ export async function listAdminDesigns(query = {}) {
       .sort({ updatedAt: -1 })
       .skip(skip)
       .limit(limit)
-      .populate('product', 'name category')
+      .populate('product', 'name category subcategory')
       .populate('creator', 'name email')
       .lean(),
     Design.countDocuments(filter),

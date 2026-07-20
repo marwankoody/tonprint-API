@@ -2,15 +2,48 @@ import mongoose from 'mongoose'
 
 const { Schema, model } = mongoose
 
-/** Catégories produits courantes sur TonPrint. */
-export const PRODUCT_CATEGORIES = [
-  't-shirts',
-  'hoodies',
-  'caps',
-  'tote-bags',
-  'mugs',
-  'uniforms',
+/**
+ * Taxonomie produits : catégorie parente → sous-catégories.
+ * Source de vérité API (miroir côté platform/marketplace/constants.js).
+ */
+export const PRODUCT_CATEGORY_TREE = {
+  't-shirts': [
+    'regular-t-shirt',
+    'oversize-t-shirt',
+    'v-neck-t-shirt',
+    'polo-shirts',
+    'kids-t-shirts',
+  ],
+  'hoodies-sweatshirts': [
+    'unisex-hoodie',
+    'oversize-hoodie',
+    'womens-hoodie',
+    'unisex-sweatshirt',
+  ],
+  'pants-shorts': ['jogging-pants', 'shorts', 'cotton-shorts'],
+  'tank-tops': ['hooded-tank-top', 'gym-tank-top'],
+  headwear: ['hats'],
+  accessories: ['tote-bags', 'stickers', 'spiral-notebooks', 'puzzles'],
+  'home-living': ['mugs', 'wall-art', 'pillows'],
+}
+
+/** Parents (ordre d'affichage). */
+export const PRODUCT_CATEGORIES = Object.keys(PRODUCT_CATEGORY_TREE)
+
+/** Union de toutes les sous-catégories. */
+export const ALL_SUBCATEGORIES = [
+  ...new Set(Object.values(PRODUCT_CATEGORY_TREE).flat()),
 ]
+
+/**
+ * @param {string} category
+ * @param {string} subcategory
+ * @returns {boolean}
+ */
+export function isValidCategoryPair(category, subcategory) {
+  const children = PRODUCT_CATEGORY_TREE[category]
+  return Boolean(children && children.includes(subcategory))
+}
 
 /**
  * Canal de distribution :
@@ -117,6 +150,12 @@ const productSchema = new Schema(
       type: String,
       required: [true, 'Category is required'],
       enum: PRODUCT_CATEGORIES,
+      index: true,
+    },
+    subcategory: {
+      type: String,
+      required: [true, 'Subcategory is required'],
+      enum: ALL_SUBCATEGORIES,
       index: true,
     },
     channel: {
@@ -234,6 +273,7 @@ const productSchema = new Schema(
   { timestamps: true }
 )
 
+productSchema.index({ isPublished: 1, channel: 1, category: 1, subcategory: 1 })
 productSchema.index({ isPublished: 1, channel: 1, category: 1 })
 productSchema.index({ isPublished: 1, channel: 1, createdAt: -1 })
 productSchema.index({ isPublished: 1, channel: 1, popularity: -1 })

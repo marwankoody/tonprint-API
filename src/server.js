@@ -2,6 +2,7 @@ import 'dotenv/config'
 import { env } from './config/env.js'
 import { connectDB, ensureIndexes } from './config/db.js'
 import { migrateLegacyCreatorRoles, migrateMissingIsActive } from './modules/auth/user.migrate.js'
+import { migrateProductCategories } from './modules/products/product.migrate.js'
 import { startNotificationCleanupScheduler } from './modules/notifications/notification.cleanup.js'
 import app from './app.js'
 
@@ -17,6 +18,11 @@ async function bootstrap() {
     const activated = await migrateMissingIsActive()
     if (activated > 0) {
       console.log(`✅ Backfilled isActive=true on ${activated} user(s)`)
+    }
+
+    const productsMigrated = await migrateProductCategories()
+    if (productsMigrated > 0) {
+      console.log(`✅ Migrated ${productsMigrated} product(s) to category + subcategory`)
     }
 
     // ensureIndexes sync les index dès qu'un modèle est enregistré (via import des routes).

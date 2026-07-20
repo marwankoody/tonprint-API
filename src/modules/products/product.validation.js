@@ -5,6 +5,8 @@ import {
   PRODUCT_CHANNELS,
   PRINT_ZONES,
   PRODUCT_QUALITY_KEYS,
+  ALL_SUBCATEGORIES,
+  isValidCategoryPair,
 } from './product.model.js'
 
 const coerceBool = z.preprocess((val) => {
@@ -12,6 +14,45 @@ const coerceBool = z.preprocess((val) => {
   if (val === 'false' || val === false) return false
   return val
 }, z.boolean())
+
+const categorySchema = z
+  .string()
+  .refine((val) => PRODUCT_CATEGORIES.includes(val), { message: 'Invalid category' })
+
+const subcategorySchema = z
+  .string()
+  .refine((val) => ALL_SUBCATEGORIES.includes(val), { message: 'Invalid subcategory' })
+
+/** Couple parent + enfant valide. */
+const categoryPairRefine = (data, ctx) => {
+  if (data.category == null || data.subcategory == null) return
+  if (!isValidCategoryPair(data.category, data.subcategory)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Subcategory does not belong to category',
+      path: ['subcategory'],
+    })
+  }
+}
+
+/** List query : subcategory seulement si category est présente + couple valide. */
+const listCategoryRefine = (data, ctx) => {
+  if (data.subcategory && !data.category) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'category is required when subcategory is set',
+      path: ['subcategory'],
+    })
+    return
+  }
+  if (data.category && data.subcategory && !isValidCategoryPair(data.category, data.subcategory)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Subcategory does not belong to category',
+      path: ['subcategory'],
+    })
+  }
+}
 
 const measurementsSchema = z
   .object({
@@ -107,39 +148,38 @@ export const productIdParamSchema = z.object({
     .regex(/^[a-fA-F0-9]{24}$/, 'Invalid product id'),
 })
 
-export const listProductsQuerySchema = z.object({
-  page: z.coerce.number().int().positive().optional(),
-  limit: z.coerce.number().int().positive().optional(),
-  category: z
-    .string()
-    .refine((val) => PRODUCT_CATEGORIES.includes(val), { message: 'Invalid category' })
-    .optional(),
-  channel: channelSchema.optional().default('marketplace'),
-  search: z.string().trim().max(120).optional(),
-  minPrice: z.coerce.number().min(0).optional(),
-  maxPrice: z.coerce.number().min(0).optional(),
-  sort: z.enum(['price_asc', 'price_desc', 'popularity', 'newest']).optional().default('newest'),
-  redeemable: coerceBool.optional(),
-})
+export const listProductsQuerySchema = z
+  .object({
+    page: z.coerce.number().int().positive().optional(),
+    limit: z.coerce.number().int().positive().optional(),
+    category: categorySchema.optional(),
+    subcategory: subcategorySchema.optional(),
+    channel: channelSchema.optional().default('marketplace'),
+    search: z.string().trim().max(120).optional(),
+    minPrice: z.coerce.number().min(0).optional(),
+    maxPrice: z.coerce.number().min(0).optional(),
+    sort: z.enum(['price_asc', 'price_desc', 'popularity', 'newest']).optional().default('newest'),
+    redeemable: coerceBool.optional(),
+  })
+  .superRefine(listCategoryRefine)
 
 /** Query pour `GET /api/products/admin` — gestion catalogue (inclut les brouillons). */
-export const adminListProductsQuerySchema = z.object({
-  page: z.coerce.number().int().positive().optional(),
-  limit: z.coerce.number().int().positive().optional(),
-  search: z.string().trim().max(120).optional(),
-  category: z
-    .string()
-    .refine((val) => PRODUCT_CATEGORIES.includes(val), { message: 'Invalid category' })
-    .optional(),
-  channel: channelSchema.optional(),
-  isPublished: coerceBool.optional(),
-})
+export const adminListProductsQuerySchema = z
+  .object({
+    page: z.coerce.number().int().positive().optional(),
+    limit: z.coerce.number().int().positive().optional(),
+    search: z.string().trim().max(120).optional(),
+    category: categorySchema.optional(),
+    subcategory: subcategorySchema.optional(),
+    channel: channelSchema.optional(),
+    isPublished: coerceBool.optional(),
+  })
+  .superRefine(listCategoryRefine)
 
-export const createProductSchema = z.object({
+const productBodyObjectSchema = z.object({
   name: z.string().trim().min(2, 'Name must be at least 2 characters').max(120),
-  category: z
-    .string()
-    .refine((val) => PRODUCT_CATEGORIES.includes(val), { message: 'Invalid category' }),
+  category: categorySchema,
+  subcategory: subcategorySchema,
   channel: channelSchema.default('marketplace'),
   description: z.string().trim().max(20000).optional().default(''),
   printType: z.string().trim().max(60).optional().default(''),
@@ -166,9 +206,27 @@ export const createProductSchema = z.object({
   printAreas: printAreasSchema.optional().default([]),
 })
 
-export const updateProductSchema = createProductSchema.partial().extend({
-  removeImagePublicIds: z.array(z.string().min(1)).optional(),
-})
+export const createProductSchema = productBodyObjectSchema.superRefine(categoryPairRefine)
+
+// Zod v4 : `.partial()` interdit sur un schéma déjà affiné — partir de l'objet brut.
+export const updateProductSchema = productBodyObjectSchema
+  .partial()
+  .extend({
+    removeImagePublicIds: z.array(z.string().min(1)).optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.category !== undefined || data.subcategory !== undefined) {
+      if (data.category === undefined || data.subcategory === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'category and subcategory must be sent together',
+          path: ['subcategory'],
+        })
+        return
+      }
+      categoryPairRefine(data, ctx)
+    }
+  })
 
 /**
  * Parse le corps d'une requête multipart (champs texte + JSON `variants` / `colors`).
