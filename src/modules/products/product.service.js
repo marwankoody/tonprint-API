@@ -75,7 +75,21 @@ const LIST_PROJECTION = '-printAreas -description'
 
 /** Tous les publicIds Cloudinary des mockups d'un produit. */
 function collectMockupPublicIds(printAreas = []) {
-  return printAreas.flatMap((area) => (area.mockups || []).map((m) => m.publicId))
+  return printAreas.flatMap((area) =>
+    (area.mockups || []).map((m) => m.publicId).filter(Boolean)
+  )
+}
+
+/** publicIds Cloudinary (previews + print) pour une liste de designs. */
+function collectDesignAssetPublicIds(designs = []) {
+  const ids = []
+  for (const design of designs) {
+    for (const zone of design.zones || []) {
+      if (zone.previewPublicId) ids.push(zone.previewPublicId)
+      if (zone.printFilePublicId) ids.push(zone.printFilePublicId)
+    }
+  }
+  return ids
 }
 
 /** Filtre canal : docs sans `channel` = marketplace (rétrocompat). */
@@ -319,7 +333,11 @@ export async function updateProduct(id, data, files = []) {
 }
 
 /**
- * Dépublie un produit (soft delete) et supprime ses images Cloudinary.
+ * Suppression définitive d'un produit + designs liés + assets Cloudinary.
+ * - Images / mockups catalogue du produit
+ * - Designs dont `product` pointe vers ce produit (previews + print files)
+ * - Détache `sourceDesign` sur d'éventuels produits marketplace liés
+ * Les commandes gardent leurs snapshots (name, prix, designSnapshot).
  * @param {string} id
  */
 export async function deleteProduct(id) {
@@ -332,20 +350,42 @@ export async function deleteProduct(id) {
     throw new AppError('Product not found', 404, 'PRODUCT_NOT_FOUND')
   }
 
-  const publicIds = [
-    ...product.images.map((img) => img.publicId),
-    ...collectMockupPublicIds(product.printAreas),
-  ]
-  if (publicIds.length) {
-    await deleteCloudinaryImages(publicIds)
+  const linkedDesigns = await Design.find({ product: id })
+    .select('_id zones.previewPublicId zones.printFilePublicId')
+    .lean()
+
+  const designIds = linkedDesigns.map((d) => d._id)
+
+  if (designIds.length) {
+    await Product.updateMany(
+      { sourceDesign: { $in: designIds } },
+      { $set: { sourceDesign: null, creator: null } }
+    )
+    await Design.deleteMany({ _id: { $in: designIds } })
   }
 
-  product.isPublished = false
-  product.images = []
-  product.printAreas = []
-  await product.save()
+  const publicIds = [
+    ...new Set([
+      ...product.images.map((img) => img.publicId).filter(Boolean),
+      ...collectMockupPublicIds(product.printAreas),
+      ...collectDesignAssetPublicIds(linkedDesigns),
+    ]),
+  ]
 
-  return { id: product._id.toString(), isPublished: false }
+  await product.deleteOne()
+
+  if (publicIds.length) {
+    try {
+      await deleteCloudinaryImages(publicIds)
+    } catch (err) {
+      console.error(
+        `[products] Cloudinary cleanup failed for product ${id} (${publicIds.length} assets):`,
+        err?.message || err
+      )
+    }
+  }
+
+  return { deleted: true, id: product._id.toString() }
 }
 
 /**

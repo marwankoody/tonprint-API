@@ -51,7 +51,19 @@ const designSchema = new Schema(
     product: {
       type: Schema.Types.ObjectId,
       ref: 'Product',
-      required: true,
+      // Nullable pour designs orphelins legacy (détache avant cascade-delete).
+      default: null,
+      index: true,
+    },
+    /** Legacy : nom figé si le produit a été détaché (plus écrit à la suppression). */
+    productSnapshot: {
+      type: new Schema(
+        {
+          name: { type: String, trim: true, maxlength: 200, default: '' },
+        },
+        { _id: false }
+      ),
+      default: undefined,
     },
     title: {
       type: String,

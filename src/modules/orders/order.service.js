@@ -204,6 +204,13 @@ async function resolveDesignsForOrder(inputItems, userId) {
     if (design.creator?.toString?.() !== userId) {
       throw new AppError('Insufficient permissions for design order', 403, 'FORBIDDEN')
     }
+    if (!design.product) {
+      throw new AppError(
+        'This design is no longer linked to a catalog product',
+        409,
+        'PRODUCT_DELETED'
+      )
+    }
     if (design.product?.toString?.() !== input.productId) {
       throw new AppError('Design does not belong to this product', 400, 'DESIGN_PRODUCT_MISMATCH')
     }

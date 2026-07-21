@@ -21,12 +21,7 @@ import {
 function formatDesign(design, options = {}) {
   const { includeCanvas = false, includePrintFiles = false } = options
 
-  const productId =
-    design.product && typeof design.product === 'object' && design.product._id
-      ? undefined
-      : (design.product?.toString?.() ?? design.product ?? null)
-
-  const product =
+  const populated =
     design.product && typeof design.product === 'object' && design.product._id
       ? {
           id: design.product._id.toString(),
@@ -35,12 +30,20 @@ function formatDesign(design, options = {}) {
           subcategory: design.product.subcategory,
           price: design.product.price,
         }
-      : productId
+      : null
+
+  const productId =
+    !populated && design.product
+      ? (design.product?.toString?.() ?? design.product)
+      : null
+
+  const snapshotName = design.productSnapshot?.name || ''
 
   return {
     id: design._id.toString(),
     creator: design.creator?.toString?.() ?? design.creator,
-    product,
+    product: populated || productId,
+    productSnapshot: snapshotName ? { name: snapshotName } : null,
     title: design.title,
     variant: design.variant || {},
     zones: (design.zones || []).map((z) => ({
@@ -65,6 +68,22 @@ function collectAssetPublicIds(design) {
     if (zone.printFilePublicId) ids.push(zone.printFilePublicId)
   }
   return ids
+}
+
+/**
+ * Vérifie que le design est encore lié à un produit catalogue.
+ * @param {object} design
+ */
+function assertDesignHasProduct(design) {
+  const productId = design.product?._id?.toString?.() ?? design.product?.toString?.() ?? design.product
+  if (!productId) {
+    throw new AppError(
+      'This design is no longer linked to a catalog product',
+      409,
+      'PRODUCT_DELETED'
+    )
+  }
+  return productId
 }
 
 /**
@@ -156,7 +175,8 @@ export async function updateDesign(designId, userId, payload) {
   if (payload.variant !== undefined) design.variant = payload.variant
 
   if (payload.zones !== undefined) {
-    await assertProductAllowsZones(design.product.toString(), payload.zones)
+    const productId = assertDesignHasProduct(design)
+    await assertProductAllowsZones(productId, payload.zones)
 
     const previousZones = new Map(design.zones.map((z) => [z.zone, z]))
     const removedZoneAssets = []
@@ -227,7 +247,21 @@ export async function listMyDesigns(userId, query) {
  * @param {string} userId
  */
 export async function getMyDesignById(designId, userId) {
-  const design = await findOwnedDesign(designId, userId, { lean: true })
+  if (!mongoose.isValidObjectId(designId)) {
+    throw new AppError('Invalid design id', 400, 'INVALID_ID')
+  }
+
+  const design = await Design.findById(designId)
+    .populate('product', 'name category subcategory price')
+    .lean()
+
+  if (!design) {
+    throw new AppError('Design not found', 404, 'DESIGN_NOT_FOUND')
+  }
+  if (design.creator.toString() !== userId) {
+    throw new AppError('Insufficient permissions', 403, 'FORBIDDEN')
+  }
+
   return formatDesign(design, { includeCanvas: true })
 }
 
@@ -277,6 +311,7 @@ export async function uploadCreatorImage(userId, file) {
  */
 export async function saveZoneAssets(designId, userId, zone, files) {
   const design = await findOwnedDesign(designId, userId)
+  assertDesignHasProduct(design)
 
   const zoneEntry = design.zones.find((z) => z.zone === zone)
   if (!zoneEntry) {
@@ -327,6 +362,7 @@ export async function saveZoneAssets(designId, userId, zone, files) {
  */
 export async function submitDesign(designId, userId) {
   const design = await findOwnedDesign(designId, userId, { select: '-zones.canvasJson' })
+  assertDesignHasProduct(design)
 
   if (design.status === 'pending_review') {
     return formatDesign(design)

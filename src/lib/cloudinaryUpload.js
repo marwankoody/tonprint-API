@@ -134,13 +134,12 @@ export async function uploadDesignPrintFile(buffer, originalName = 'print-file')
  * @param {string[]} publicIds
  */
 export async function deleteCloudinaryImages(publicIds) {
-  if (!publicIds?.length) return
+  const ids = [...new Set((publicIds || []).filter(Boolean))]
+  if (!ids.length) return
 
   assertCloudinaryReady()
 
   await Promise.all(
-    publicIds.map((publicId) =>
-      cloudinary.uploader.destroy(publicId, { resource_type: 'image' })
-    )
+    ids.map((publicId) => cloudinary.uploader.destroy(publicId, { resource_type: 'image' }))
   )
 }
