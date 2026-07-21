@@ -2,7 +2,7 @@ import mongoose from 'mongoose'
 import { BlogPost, BLOG_LOCALES } from './blog.model.js'
 import { AppError } from '../../utils/AppError.js'
 import { parsePagination, paginationMeta } from '../../utils/pagination.js'
-import { uploadBlogCover, deleteCloudinaryImages } from '../../lib/cloudinaryUpload.js'
+import { deleteCloudinaryImages } from '../../lib/cloudinaryUpload.js'
 import {
   sanitizeBlogHtml,
   estimateReadingTimeMinutes,
@@ -294,17 +294,16 @@ export async function getPostAdmin(id) {
 
 /**
  * @param {object} data
- * @param {import('express').Request['file']} [coverFile]
  * @param {string} authorId
  */
-export async function createPost(data, coverFile, authorId) {
+export async function createPost(data, authorId) {
   const locales = normalizeLocales(data.locales)
   const requestedSlug = data.slug || slugify(locales.fr.title)
   const slug = await ensureUniqueSlug(requestedSlug || `post-${Date.now()}`)
 
   let coverImage = null
-  if (coverFile) {
-    coverImage = await uploadBlogCover(coverFile.buffer, coverFile.originalname)
+  if (data.coverImageUrl) {
+    coverImage = { url: data.coverImageUrl, publicId: null }
   }
 
   const isPublished = Boolean(data.isPublished)
@@ -327,9 +326,8 @@ export async function createPost(data, coverFile, authorId) {
 /**
  * @param {string} id
  * @param {object} data
- * @param {import('express').Request['file']} [coverFile]
  */
-export async function updatePost(id, data, coverFile) {
+export async function updatePost(id, data) {
   if (!mongoose.isValidObjectId(id)) {
     throw new AppError('Invalid post id', 400, 'INVALID_ID')
   }
@@ -354,16 +352,18 @@ export async function updatePost(id, data, coverFile) {
     post.slug = await ensureUniqueSlug(data.slug, id)
   }
 
-  if (data.removeCover && post.coverImage?.publicId) {
-    await deleteCloudinaryImages([post.coverImage.publicId])
-    post.coverImage = null
-  }
-
-  if (coverFile) {
+  if (data.removeCover) {
     if (post.coverImage?.publicId) {
       await deleteCloudinaryImages([post.coverImage.publicId])
     }
-    post.coverImage = await uploadBlogCover(coverFile.buffer, coverFile.originalname)
+    post.coverImage = null
+  }
+
+  if (data.coverImageUrl) {
+    if (post.coverImage?.publicId) {
+      await deleteCloudinaryImages([post.coverImage.publicId])
+    }
+    post.coverImage = { url: data.coverImageUrl, publicId: null }
   }
 
   const wasPublished = post.isPublished

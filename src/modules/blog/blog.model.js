@@ -16,7 +16,8 @@ export const BLOG_LOCALES = Object.freeze(['fr', 'en', 'ar'])
 const coverImageSchema = new Schema(
   {
     url: { type: String, required: true },
-    publicId: { type: String, required: true },
+    /** Présent seulement pour les anciennes covers uploadées Cloudinary. */
+    publicId: { type: String, default: null },
   },
   { _id: false }
 )

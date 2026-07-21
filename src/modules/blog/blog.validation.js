@@ -59,6 +59,13 @@ export const adminListBlogQuerySchema = z.object({
   isPublished: coerceBool.optional(),
 })
 
+const httpsUrlSchema = z
+  .string()
+  .trim()
+  .url()
+  .refine((val) => /^https:\/\//i.test(val), { message: 'Cover URL must be https' })
+  .max(2048)
+
 export const createBlogPostSchema = z.object({
   slug: slugSchema.optional(),
   category: z
@@ -66,6 +73,7 @@ export const createBlogPostSchema = z.object({
     .refine((val) => BLOG_CATEGORIES.includes(val), { message: 'Invalid category' }),
   isPublished: coerceBool.optional().default(false),
   locales: localesSchema.optional().default({}),
+  coverImageUrl: httpsUrlSchema.optional().nullable(),
 })
 
 export const updateBlogPostSchema = createBlogPostSchema.partial().extend({
@@ -85,20 +93,3 @@ export const blogSlugParamSchema = z.object({
     .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'Invalid slug'),
 })
 
-/**
- * Parse le corps multipart (JSON stringifié pour `locales`).
- * @param {import('express').Request['body']} body
- */
-export function parseMultipartBlogBody(body) {
-  const parsed = { ...body }
-
-  if (typeof parsed.locales === 'string') {
-    try {
-      parsed.locales = JSON.parse(parsed.locales)
-    } catch {
-      throw new Error('Invalid locales JSON')
-    }
-  }
-
-  return parsed
-}

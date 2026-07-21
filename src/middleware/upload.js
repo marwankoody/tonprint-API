@@ -93,15 +93,15 @@ const multerInstance = multer({
 export const uploadProductImages = withImageContentCheck(multerInstance.array('images', MAX_FILES))
 
 /**
- * Middleware Multer pour la cover blog (1 fichier × 5 Mo).
- * Champ attendu : `cover`.
+ * Middleware Multer pour une image inline éditeur riche (1 fichier × 5 Mo).
+ * Champ attendu : `image`.
  */
-export const uploadBlogCover = withImageContentCheck(
+export const uploadRichTextImageFile = withImageContentCheck(
   multer({
     storage,
     fileFilter,
     limits: { fileSize: MAX_FILE_SIZE, files: 1 },
-  }).single('cover')
+  }).single('image')
 )
 
 /**

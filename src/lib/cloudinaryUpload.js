@@ -5,7 +5,7 @@ import { AppError } from '../utils/AppError.js'
 import { assertImageBuffer } from '../utils/assertImageBuffer.js'
 
 const PRODUCT_FOLDER = 'tonprint/products'
-const BLOG_FOLDER = 'tonprint/blog'
+const CONTENT_FOLDER = 'tonprint/content'
 const MOCKUP_FOLDER = 'tonprint/products/mockups'
 const DESIGN_UPLOADS_FOLDER = 'tonprint/designs/uploads'
 const DESIGN_PREVIEWS_FOLDER = 'tonprint/designs/previews'
@@ -76,13 +76,13 @@ export async function uploadProductImage(buffer, originalName = 'product') {
 }
 
 /**
- * Upload une cover blog vers Cloudinary.
+ * Upload une image inline (éditeur riche blog / description produit).
  * @param {Buffer} buffer
  * @param {string} [originalName]
  * @returns {Promise<{ url: string, publicId: string }>}
  */
-export async function uploadBlogCover(buffer, originalName = 'blog-cover') {
-  return uploadImageToFolder(buffer, BLOG_FOLDER, originalName)
+export async function uploadRichTextImage(buffer, originalName = 'content-image') {
+  return uploadImageToFolder(buffer, CONTENT_FOLDER, originalName)
 }
 
 /**

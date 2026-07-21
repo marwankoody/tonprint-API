@@ -1,6 +1,23 @@
 import { asyncHandler } from '../../middleware/errorHandler.js'
 import { AppError } from '../../utils/AppError.js'
 import { env } from '../../config/env.js'
+import { uploadRichTextImage } from '../../lib/cloudinaryUpload.js'
+
+/**
+ * Upload immédiat d'une image pour l'éditeur riche (blog / descriptions).
+ * Stockée sur Cloudinary (`tonprint/content`).
+ */
+export const uploadAdminMedia = asyncHandler(async (req, res) => {
+  if (!req.file) {
+    throw new AppError('Image file is required', 400, 'IMAGE_REQUIRED')
+  }
+
+  const uploaded = await uploadRichTextImage(req.file.buffer, req.file.originalname)
+  res.status(201).json({
+    success: true,
+    data: { image: uploaded },
+  })
+})
 
 /**
  * Proxy de téléchargement admin : fetch Cloudinary côté serveur et renvoie

@@ -1,11 +1,22 @@
 import sanitizeHtml from 'sanitize-html'
-import { env } from '../config/env.js'
+
+const COLOR_REGEXES = [
+  /^#(0x)?[0-9a-f]+$/i,
+  /^rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)$/,
+  /^hsl\(\s*\d+(?:\.\d+)?(?:deg)?\s+\d+(?:\.\d+)?%\s+\d+(?:\.\d+)?%\s*\)$/i,
+  /^hsl\(\s*\d+(?:\.\d+)?\s*,\s*\d+(?:\.\d+)?%\s*,\s*\d+(?:\.\d+)?%\s*\)$/i,
+]
+
+/** Safe CSS font-family stacks (no url()/expression()). */
+const FONT_FAMILY_REGEX =
+  /^[a-zA-Z0-9\s,\-'"_.]+(?:\s*,\s*[a-zA-Z0-9\s,\-'"_.]+)*$/
 
 const ALLOWED_TAGS = [
   'p',
   'br',
   'h2',
   'h3',
+  'h4',
   'ul',
   'ol',
   'li',
@@ -15,33 +26,27 @@ const ALLOWED_TAGS = [
   'u',
   'b',
   'i',
+  's',
+  'del',
   'span',
   'img',
+  'blockquote',
 ]
 
 const ALLOWED_STYLES = {
   '*': {
-    color: [
-      /^#(0x)?[0-9a-f]+$/i,
-      /^rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)$/,
-      /^hsl\(\s*\d+(?:\.\d+)?(?:deg)?\s+\d+(?:\.\d+)?%\s+\d+(?:\.\d+)?%\s*\)$/i,
-      /^hsl\(\s*\d+(?:\.\d+)?\s*,\s*\d+(?:\.\d+)?%\s*,\s*\d+(?:\.\d+)?%\s*\)$/i,
-    ],
+    color: COLOR_REGEXES,
+    'background-color': COLOR_REGEXES,
     'font-size': [/^\d+(?:\.\d+)?(?:px|rem|em)$/],
+    'font-family': [FONT_FAMILY_REGEX],
     'text-align': [/^left$/, /^center$/, /^right$/, /^justify$/],
   },
-}
-
-/**
- * Autorise uniquement les images hébergées sur notre cloud Cloudinary.
- * @param {string} src
- */
-function isAllowedImageSrc(src) {
-  if (!src || typeof src !== 'string') return false
-  const cloud = env.CLOUDINARY_CLOUD_NAME
-  if (!cloud) return false
-  const prefix = `https://res.cloudinary.com/${cloud}/`
-  return src.startsWith(prefix)
+  img: {
+    'max-width': [/^100%$/],
+    height: [/^auto$/],
+    display: [/^block$/],
+    margin: [/^\d+(?:\.\d+)?(?:px|rem|em|%)?(?:\s+\d+(?:\.\d+)?(?:px|rem|em|%)?){0,3}$/],
+  },
 }
 
 /**
@@ -62,8 +67,10 @@ export function sanitizeRichHtml(html) {
       p: ['style', 'class'],
       h2: ['style', 'class'],
       h3: ['style', 'class'],
+      h4: ['style', 'class'],
       span: ['style', 'class'],
       li: ['style', 'class'],
+      blockquote: ['style', 'class'],
     },
     allowedStyles: ALLOWED_STYLES,
     allowedSchemes: ['http', 'https', 'mailto'],
@@ -73,7 +80,8 @@ export function sanitizeRichHtml(html) {
     transformTags: {
       a: sanitizeHtml.simpleTransform('a', { rel: 'noopener noreferrer' }),
       img(tagName, attribs) {
-        if (!isAllowedImageSrc(attribs.src)) {
+        const src = attribs.src || ''
+        if (!/^https:\/\//i.test(src)) {
           return { tagName: 'span', text: '', attribs: {} }
         }
         return { tagName, attribs }

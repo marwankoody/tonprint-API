@@ -25,13 +25,13 @@ export const getPostAdmin = asyncHandler(async (req, res) => {
 })
 
 export const createPost = asyncHandler(async (req, res) => {
-  const post = await blogService.createPost(req.body, req.file, req.user.id)
+  const post = await blogService.createPost(req.body, req.user.id)
   res.status(201).json({ success: true, data: { post } })
 })
 
 export const updatePost = asyncHandler(async (req, res) => {
   const { id } = req.validatedParams ?? req.params
-  const post = await blogService.updatePost(id, req.body, req.file)
+  const post = await blogService.updatePost(id, req.body)
   res.status(200).json({ success: true, data: { post } })
 })
 

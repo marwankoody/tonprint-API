@@ -2,8 +2,6 @@ import { Router } from 'express'
 import { authenticate } from '../../middleware/auth.js'
 import { requireRole } from '../../middleware/requireRole.js'
 import { validate } from '../../middleware/validate.js'
-import { uploadBlogCover, handleUploadErrors } from '../../middleware/upload.js'
-import { AppError } from '../../utils/AppError.js'
 import {
   listBlogQuerySchema,
   adminListBlogQuerySchema,
@@ -11,7 +9,6 @@ import {
   updateBlogPostSchema,
   blogIdParamSchema,
   blogSlugParamSchema,
-  parseMultipartBlogBody,
 } from './blog.validation.js'
 import * as blogController from './blog.controller.js'
 
@@ -46,17 +43,6 @@ router.post(
   '/',
   authenticate,
   requireRole('admin'),
-  (req, res, next) => {
-    uploadBlogCover(req, res, (err) => {
-      if (err) return handleUploadErrors(err, req, res, next)
-      try {
-        req.body = parseMultipartBlogBody(req.body)
-        next()
-      } catch (e) {
-        next(new AppError(e.message, 400, 'VALIDATION_ERROR'))
-      }
-    })
-  },
   validate(createBlogPostSchema),
   blogController.createPost
 )
@@ -66,17 +52,6 @@ router.put(
   authenticate,
   requireRole('admin'),
   validate(blogIdParamSchema, 'params'),
-  (req, res, next) => {
-    uploadBlogCover(req, res, (err) => {
-      if (err) return handleUploadErrors(err, req, res, next)
-      try {
-        req.body = parseMultipartBlogBody(req.body)
-        next()
-      } catch (e) {
-        next(new AppError(e.message, 400, 'VALIDATION_ERROR'))
-      }
-    })
-  },
   validate(updateBlogPostSchema),
   blogController.updatePost
 )
