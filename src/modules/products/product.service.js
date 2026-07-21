@@ -372,7 +372,10 @@ export async function deleteProduct(id) {
     ]),
   ]
 
-  await product.deleteOne()
+  const removed = await Product.findByIdAndDelete(id)
+  if (!removed) {
+    throw new AppError('Product not found', 404, 'PRODUCT_NOT_FOUND')
+  }
 
   if (publicIds.length) {
     try {
@@ -385,7 +388,7 @@ export async function deleteProduct(id) {
     }
   }
 
-  return { deleted: true, id: product._id.toString() }
+  return { deleted: true, id: String(id) }
 }
 
 /**
