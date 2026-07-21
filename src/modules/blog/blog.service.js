@@ -9,49 +9,15 @@ import {
   slugify,
 } from './blog.utils.js'
 import { escapeRegex } from '../../utils/escapeRegex.js'
-import fs from 'node:fs'
-import path from 'node:path'
 
 /**
  * @param {object} raw
  */
 function normalizeLocale(raw = {}) {
-  const before = String(raw.content || '')
-  const after = sanitizeBlogHtml(before)
-  // #region agent log
-  try {
-    const logPath = path.resolve(process.cwd(), '..', 'debug-6814de.log')
-    const altPath = path.resolve(process.cwd(), '..', '.cursor', 'debug-6814de.log')
-    const line = `${JSON.stringify({
-        sessionId: '6814de',
-        runId: 'pre-fix',
-        hypothesisId: 'C',
-        location: 'blog.service.js:normalizeLocale',
-        message: 'sanitize content before/after',
-        data: {
-          beforeHasColor: /style\s*=\s*["'][^"']*color\s*:/i.test(before),
-          afterHasColor: /style\s*=\s*["'][^"']*color\s*:/i.test(after),
-          beforeLen: before.length,
-          afterLen: after.length,
-          beforeSnippet: before.slice(0, 400),
-          afterSnippet: after.slice(0, 400),
-        },
-        timestamp: Date.now(),
-      })}\n`
-    fs.appendFileSync(logPath, line)
-    try {
-      fs.appendFileSync(altPath, line)
-    } catch {
-      /* optional */
-    }
-  } catch {
-    /* ignore */
-  }
-  // #endregion
   return {
     title: String(raw.title || '').trim(),
     excerpt: String(raw.excerpt || '').trim(),
-    content: after,
+    content: sanitizeBlogHtml(raw.content || ''),
     metaTitle: String(raw.metaTitle || '').trim(),
     metaDescription: String(raw.metaDescription || '').trim(),
   }
