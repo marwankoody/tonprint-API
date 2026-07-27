@@ -93,13 +93,19 @@ async function issueTokenPair(user) {
  * @param {{ name: string, email: string, password: string }} input
  */
 export async function register({ name, email, password }) {
-  const alreadyExists = await User.exists({ email })
-  if (alreadyExists) {
-    throw new AppError('An account with this email already exists', 409, 'EMAIL_TAKEN')
-  }
-
+  // Hash toujours avant create : timing comparable si email déjà pris,
+  // et unique index gère la course TOCTOU (plus de exists() + EMAIL_TAKEN).
   const hashedPassword = await bcrypt.hash(password, PASSWORD_SALT_ROUNDS)
-  const user = await User.create({ name, email, password: hashedPassword })
+
+  let user
+  try {
+    user = await User.create({ name, email, password: hashedPassword })
+  } catch (err) {
+    if (err?.code === 11000) {
+      throw new AppError('Unable to create account', 400, 'REGISTRATION_FAILED')
+    }
+    throw err
+  }
 
   const tokens = await issueTokenPair(user)
   return { user: sanitizeUser(user), ...tokens }
@@ -182,8 +188,8 @@ export async function logout(userId) {
 export async function getMe(userId) {
   const user = await User.findById(userId).lean()
 
-  if (!user) {
-    throw new AppError('User not found', 404, 'USER_NOT_FOUND')
+  if (!user || user.isActive === false) {
+    throw new AppError('This account has been disabled', 401, 'ACCOUNT_DISABLED')
   }
 
   return sanitizeUser(user)

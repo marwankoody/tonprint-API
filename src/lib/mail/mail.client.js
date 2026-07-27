@@ -22,21 +22,18 @@ function getTransporter() {
 
 /**
  * Envoie un email via Gmail SMTP (Nodemailer).
- * Sans credentials : skip (en dev, log sujet + destinataire + debugPayload optionnel).
+ * Sans credentials : skip (en dev, log sujet + destinataire).
  *
- * @param {{
- *   to: string,
- *   subject: string,
- *   html: string,
- *   text: string,
- *   debugPayload?: Record<string, unknown>,
- * }} opts
+ * @param {{ to: string, subject: string, html: string, text: string }} opts
  */
-export async function sendMail({ to, subject, html, text, debugPayload }) {
+export async function sendMail({ to, subject, html, text }) {
   if (!isMailConfigured) {
     if (env.NODE_ENV !== 'production') {
-      console.info('[mail] SMTP not configured — email skipped')
-      console.info('[mail]', { to, subject, from: env.SMTP_FROM, ...debugPayload })
+      console.info('[mail] SMTP not configured — email skipped', {
+        to,
+        subject,
+        from: env.SMTP_FROM,
+      })
     }
     return { skipped: true }
   }

@@ -13,14 +13,13 @@ const envSchema = z.object({
   JWT_ACCESS_EXPIRES_IN: z.string().default('15m'),
   JWT_REFRESH_EXPIRES_IN: z.string().default('1d'),
   CORS_ORIGINS: z.string().min(1, 'CORS_ORIGINS is required'),
-  FRONTEND_URL: z.string().url().default('https://www.tonprint.ma'),
   COOKIE_DOMAIN: z.string().optional().default(''),
   CLOUDINARY_CLOUD_NAME: z.string().optional().default(''),
   CLOUDINARY_API_KEY: z.string().optional().default(''),
   CLOUDINARY_API_SECRET: z.string().optional().default(''),
   CONTACT_SHEETS_WEBHOOK_URL: z.string().optional().default(''),
   CONTACT_SHEETS_SECRET: z.string().optional().default(''),
-  // Gmail SMTP (App Password)
+  // Gmail SMTP (App Password) — obligatoire en production
   SMTP_HOST: z.string().optional().default('smtp.gmail.com'),
   SMTP_PORT: z.coerce.number().int().positive().default(587),
   SMTP_SECURE: z
@@ -28,12 +27,9 @@ const envSchema = z.object({
     .optional()
     .default('false')
     .transform((v) => ['1', 'true', 'yes', 'on'].includes(String(v).toLowerCase())),
-  SMTP_USER: z.string().optional().default('tonprint.officiel@gmail.com'),
+  SMTP_USER: z.string().optional().default(''),
   SMTP_PASS: z.string().optional().default(''),
-  SMTP_FROM: z
-    .string()
-    .optional()
-    .default('TonPrint <tonprint.officiel@gmail.com>'),
+  SMTP_FROM: z.string().optional().default(''),
 })
 
 function normalizeSmtpPass(password) {
@@ -51,15 +47,10 @@ const parsed = envSchema
     message: 'JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be different',
     path: ['JWT_REFRESH_SECRET'],
   })
-  .refine(
-    (data) =>
-      data.NODE_ENV !== 'production' ||
-      !/localhost|127\.0\.0\.1/i.test(data.FRONTEND_URL),
-    {
-      message: 'FRONTEND_URL must be the public site URL in production (not localhost)',
-      path: ['FRONTEND_URL'],
-    }
-  )
+  .refine((data) => data.NODE_ENV !== 'production' || hasSmtpConfig(data), {
+    message: 'SMTP_USER and SMTP_PASS are required in production (password reset emails)',
+    path: ['SMTP_PASS'],
+  })
   .safeParse(process.env)
 
 if (!parsed.success) {
@@ -74,6 +65,11 @@ if (!parsed.success) {
 export const env = {
   ...parsed.data,
   SMTP_PASS: normalizeSmtpPass(parsed.data.SMTP_PASS),
+  SMTP_FROM:
+    String(parsed.data.SMTP_FROM || '').trim() ||
+    (parsed.data.SMTP_USER
+      ? `TonPrint <${String(parsed.data.SMTP_USER).trim()}>`
+      : ''),
 }
 
 export const corsOrigins = env.CORS_ORIGINS.split(',')

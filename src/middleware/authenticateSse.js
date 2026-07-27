@@ -1,7 +1,7 @@
 import { AppError } from '../utils/AppError.js'
 import { asyncHandler } from './errorHandler.js'
-import { verifyAccessToken } from '../utils/jwt.js'
-import { normalizeRoles } from '../modules/auth/user.model.js'
+import { resolveAccessUser } from './auth.js'
+import { User, normalizeRoles } from '../modules/auth/user.model.js'
 import { consumeSseTicket } from '../modules/notifications/sseTicket.store.js'
 
 /**
@@ -12,31 +12,25 @@ import { consumeSseTicket } from '../modules/notifications/sseTicket.store.js'
 export const authenticateSse = asyncHandler(async (req, _res, next) => {
   const header = req.headers.authorization
   if (header?.startsWith('Bearer ')) {
-    const token = header.slice(7)
-    try {
-      const payload = verifyAccessToken(token)
-      req.user = {
-        id: payload.sub,
-        roles: normalizeRoles(payload.roles || []),
-      }
-      return next()
-    } catch (err) {
-      if (err.name === 'TokenExpiredError') {
-        throw new AppError('Access token expired', 401, 'TOKEN_EXPIRED')
-      }
-      throw new AppError('Invalid access token', 401, 'INVALID_TOKEN')
-    }
+    req.user = await resolveAccessUser(header.slice(7))
+    return next()
   }
 
   const rawTicket = typeof req.query.ticket === 'string' ? req.query.ticket.trim() : ''
   if (rawTicket) {
-    const user = consumeSseTicket(rawTicket)
-    if (!user) {
+    const ticketUser = consumeSseTicket(rawTicket)
+    if (!ticketUser) {
       throw new AppError('Invalid or expired SSE ticket', 401, 'INVALID_SSE_TICKET')
     }
+
+    const user = await User.findById(ticketUser.id).select('roles isActive').lean()
+    if (!user || user.isActive === false) {
+      throw new AppError('This account has been disabled', 401, 'ACCOUNT_DISABLED')
+    }
+
     req.user = {
-      id: user.id,
-      roles: normalizeRoles(user.roles || []),
+      id: user._id.toString(),
+      roles: normalizeRoles(user.roles),
     }
     return next()
   }
