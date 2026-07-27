@@ -87,6 +87,16 @@ const colorSchema = new Schema(
   { _id: false }
 )
 
+/** Stock par combinaison couleur × taille (source de vérité quand renseigné). */
+const stockByOptionSchema = new Schema(
+  {
+    colorName: { type: String, trim: true, maxlength: 80, default: '' },
+    sizeLabel: { type: String, trim: true, maxlength: 80, default: '' },
+    quantity: { type: Number, min: 0, default: 0 },
+  },
+  { _id: false }
+)
+
 /** Qualité vendable : clé fixe + prix absolu (remplace le prix de base si sélectionnée). */
 const qualitySchema = new Schema(
   {
@@ -194,6 +204,14 @@ const productSchema = new Schema(
     },
     colors: {
       type: [colorSchema],
+      default: [],
+    },
+    /**
+     * Matrice stock couleur × taille.
+     * Quand non vide : source de vérité ; `stock` et `variants[].stock` sont des agrégats.
+     */
+    stockByOption: {
+      type: [stockByOptionSchema],
       default: [],
     },
     /** Qualités proposées (normal / premium / oversize) avec prix dédié. */

@@ -9,6 +9,7 @@ import {
 } from '../../lib/cloudinaryUpload.js'
 import { sanitizeRichHtml } from '../../utils/sanitizeHtml.js'
 import { Design } from '../designs/design.model.js'
+import { syncAggregatedStock } from './stockStatus.js'
 
 /**
  * Résout sourceDesign → creator (dénormalisé). Chaîne vide / null détache le lien.
@@ -50,6 +51,7 @@ function formatProduct(product) {
     printTypes: product.printTypes || [],
     variants: product.variants,
     colors: product.colors || [],
+    stockByOption: product.stockByOption || [],
     qualities: product.qualities || [],
     price: product.price,
     compareAtPrice: product.compareAtPrice ?? null,
@@ -71,7 +73,7 @@ function formatProduct(product) {
 }
 
 /** Projection listes : mockups + description HTML inutiles hors détail. */
-const LIST_PROJECTION = '-printAreas -description'
+const LIST_PROJECTION = '-printAreas -description -stockByOption'
 
 /** Tous les publicIds Cloudinary des mockups d'un produit. */
 function collectMockupPublicIds(printAreas = []) {
@@ -260,10 +262,11 @@ export async function createProduct(data, files = []) {
   }
 
   const resolved = await resolveSourceDesignFields(data)
+  const synced = syncAggregatedStock(resolved)
 
   const product = await Product.create({
-    ...resolved,
-    description: sanitizeRichHtml(resolved.description || ''),
+    ...synced,
+    description: sanitizeRichHtml(synced.description || ''),
     images,
   })
   return formatProduct(product)
@@ -315,6 +318,21 @@ export async function updateProduct(id, data, files = []) {
     const resolved = await resolveSourceDesignFields(fields)
     fields.sourceDesign = resolved.sourceDesign
     fields.creator = resolved.creator
+  }
+
+  if (fields.stockByOption !== undefined || fields.variants !== undefined) {
+    const stockByOption =
+      fields.stockByOption !== undefined ? fields.stockByOption : product.stockByOption
+    const synced = syncAggregatedStock({
+      stockByOption,
+      variants: fields.variants !== undefined ? fields.variants : product.variants,
+      stock: fields.stock !== undefined ? fields.stock : product.stock,
+    })
+    // Matrice non vide = source de vérité : toujours resynchroniser les agrégats.
+    if (Array.isArray(stockByOption) && stockByOption.length) {
+      fields.stock = synced.stock
+      fields.variants = synced.variants
+    }
   }
 
   // printAreas remplacées : supprimer de Cloudinary les mockups qui ne sont plus référencés.

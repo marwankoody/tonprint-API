@@ -8,6 +8,7 @@ import { Design } from '../designs/design.model.js'
 import { Product } from '../products/product.model.js'
 import { AppError } from '../../utils/AppError.js'
 import { parsePagination, paginationMeta } from '../../utils/pagination.js'
+import { findStockOption, sellableQuantity } from '../products/stockStatus.js'
 
 /** Retire le préfixe "Admin (id): …" des anciennes écritures (jamais exposé au client). */
 function sanitizeReasonForClient(reason) {
@@ -326,15 +327,49 @@ export async function redeemProduct(userId, payload) {
 
   const pointsRequired = product.pointsCost * quantity
   const stockNeeded = quantity
-  if ((variant?.stock ?? product.stock) < stockNeeded) {
+  const sizeLabel = variant?.label || ''
+  const matrixCell = product.stockByOption?.length
+    ? findStockOption(product.stockByOption, color, sizeLabel)
+    : null
+
+  if (product.stockByOption?.length) {
+    if (sellableQuantity(matrixCell) < stockNeeded) {
+      throw new AppError('Insufficient stock', 400, 'OUT_OF_STOCK')
+    }
+  } else if ((variant?.stock ?? product.stock) < stockNeeded) {
     throw new AppError('Insufficient stock', 400, 'OUT_OF_STOCK')
   }
 
-  // Stock d'abord (conditionnel) — compensation si le reste échoue.
-  // `$elemMatch` garantit que _id et stock matchent le MÊME élément du tableau
-  // (deux conditions séparées pourraient matcher deux variantes différentes).
   let stockDecremented = false
-  if (variant) {
+  if (product.stockByOption?.length) {
+    const arrayFilters = [{ 'cell.colorName': color, 'cell.sizeLabel': sizeLabel }]
+    /** @type {Record<string, number>} */
+    const inc = {
+      'stockByOption.$[cell].quantity': -stockNeeded,
+      stock: -stockNeeded,
+      popularity: stockNeeded,
+    }
+    if (sizeLabel) {
+      inc['variants.$[v].stock'] = -stockNeeded
+      arrayFilters.push({ 'v.label': sizeLabel })
+    }
+    const updated = await Product.findOneAndUpdate(
+      {
+        _id: product._id,
+        stockByOption: {
+          $elemMatch: {
+            colorName: color,
+            sizeLabel,
+            quantity: { $gte: stockNeeded },
+          },
+        },
+      },
+      { $inc: inc },
+      { arrayFilters, new: true }
+    )
+    if (!updated) throw new AppError('Insufficient stock', 400, 'OUT_OF_STOCK')
+    stockDecremented = true
+  } else if (variant) {
     const updated = await Product.findOneAndUpdate(
       {
         _id: product._id,
@@ -419,7 +454,27 @@ export async function redeemProduct(userId, payload) {
     }
   } catch (err) {
     if (stockDecremented) {
-      if (variant) {
+      if (product.stockByOption?.length) {
+        const arrayFilters = [{ 'cell.colorName': color, 'cell.sizeLabel': sizeLabel }]
+        /** @type {Record<string, number>} */
+        const inc = {
+          'stockByOption.$[cell].quantity': stockNeeded,
+          stock: stockNeeded,
+          popularity: -stockNeeded,
+        }
+        if (sizeLabel) {
+          inc['variants.$[v].stock'] = stockNeeded
+          arrayFilters.push({ 'v.label': sizeLabel })
+        }
+        await Product.updateOne(
+          {
+            _id: product._id,
+            stockByOption: { $elemMatch: { colorName: color, sizeLabel } },
+          },
+          { $inc: inc },
+          { arrayFilters }
+        )
+      } else if (variant) {
         await Product.updateOne(
           { _id: product._id, 'variants._id': variant._id },
           { $inc: { 'variants.$.stock': stockNeeded, stock: stockNeeded, popularity: -stockNeeded } }

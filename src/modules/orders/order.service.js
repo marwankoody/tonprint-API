@@ -7,6 +7,7 @@ import { User } from '../auth/user.model.js'
 import { AppError } from '../../utils/AppError.js'
 import { parsePagination, paginationMeta } from '../../utils/pagination.js'
 import { escapeRegex } from '../../utils/escapeRegex.js'
+import { findStockOption, sellableQuantity } from '../products/stockStatus.js'
 
 /**
  * Comparaison timing-safe de deux strings (guest tokens).
@@ -226,11 +227,52 @@ async function resolveDesignsForOrder(inputItems, userId) {
 }
 
 /**
- * Décrémente le stock produit de façon atomique.
- * @param {string} productId
- * @param {number} quantity
+ * Décrémente le stock (matrice couleur×taille si présente, sinon agrégat produit).
+ * @param {{ productId: string, quantity: number, colorName?: string, sizeLabel?: string }} args
  */
-async function decrementStock(productId, quantity) {
+async function decrementStock({ productId, quantity, colorName = '', sizeLabel = '' }) {
+  const color = colorName || ''
+  const size = sizeLabel || ''
+
+  if (color || size) {
+    const arrayFilters = [{ 'cell.colorName': color, 'cell.sizeLabel': size }]
+    /** @type {Record<string, number>} */
+    const inc = {
+      'stockByOption.$[cell].quantity': -quantity,
+      stock: -quantity,
+      popularity: quantity,
+    }
+    if (size) {
+      inc['variants.$[v].stock'] = -quantity
+      arrayFilters.push({ 'v.label': size })
+    }
+
+    const updated = await Product.findOneAndUpdate(
+      {
+        _id: productId,
+        isPublished: true,
+        stockByOption: {
+          $elemMatch: {
+            colorName: color,
+            sizeLabel: size,
+            quantity: { $gte: quantity },
+          },
+        },
+      },
+      { $inc: inc },
+      { arrayFilters, new: true }
+    )
+    if (updated) return updated
+
+    const hasMatrix = await Product.exists({
+      _id: productId,
+      'stockByOption.0': { $exists: true },
+    })
+    if (hasMatrix) {
+      throw new AppError('Insufficient stock for one or more products', 409, 'INSUFFICIENT_STOCK')
+    }
+  }
+
   const updated = await Product.findOneAndUpdate(
     { _id: productId, isPublished: true, stock: { $gte: quantity } },
     { $inc: { stock: -quantity, popularity: quantity } },
@@ -246,21 +288,63 @@ async function decrementStock(productId, quantity) {
 
 /**
  * Restaure le stock après annulation (popularity bornée à ≥ 0).
- * Une seule update atomique par produit (pipeline $add / $max).
- * @param {{ product: string|object, quantity: number }[]} items
+ * @param {{ product: string|object, quantity: number, variant?: { color?: string, label?: string } }[]} items
  */
 async function restoreStock(items) {
   await Promise.all(
-    items.map((item) => {
+    items.map(async (item) => {
       const productId = item.product?.toString?.() ?? item.product
-      return Product.updateOne(
+      const quantity = item.quantity
+      const color = item.variant?.color || ''
+      const size = item.variant?.label || ''
+
+      if (color || size) {
+        const arrayFilters = [{ 'cell.colorName': color, 'cell.sizeLabel': size }]
+        /** @type {Record<string, number>} */
+        const inc = {
+          'stockByOption.$[cell].quantity': quantity,
+          stock: quantity,
+        }
+        if (size) {
+          inc['variants.$[v].stock'] = quantity
+          arrayFilters.push({ 'v.label': size })
+        }
+
+        const result = await Product.updateOne(
+          {
+            _id: productId,
+            stockByOption: { $elemMatch: { colorName: color, sizeLabel: size } },
+          },
+          { $inc: inc },
+          { arrayFilters }
+        )
+
+        if (result.modifiedCount > 0) {
+          await Product.updateOne(
+            { _id: productId },
+            [
+              {
+                $set: {
+                  popularity: {
+                    $max: [0, { $subtract: [{ $ifNull: ['$popularity', 0] }, quantity] }],
+                  },
+                },
+              },
+            ],
+            { updatePipeline: true }
+          )
+          return
+        }
+      }
+
+      await Product.updateOne(
         { _id: productId },
         [
           {
             $set: {
-              stock: { $add: ['$stock', item.quantity] },
+              stock: { $add: ['$stock', quantity] },
               popularity: {
-                $max: [0, { $subtract: [{ $ifNull: ['$popularity', 0] }, item.quantity] }],
+                $max: [0, { $subtract: [{ $ifNull: ['$popularity', 0] }, quantity] }],
               },
             },
           },
@@ -273,11 +357,17 @@ async function restoreStock(items) {
 
 /**
  * Compense les décréments déjà réussis en cas d'échec partiel.
- * @param {{ productId: string, quantity: number }[]} decremented
+ * @param {{ productId: string, quantity: number, colorName?: string, sizeLabel?: string }[]} decremented
  */
 async function compensateStock(decremented) {
   if (!decremented.length) return
-  await restoreStock(decremented.map(({ productId, quantity }) => ({ product: productId, quantity })))
+  await restoreStock(
+    decremented.map(({ productId, quantity, colorName, sizeLabel }) => ({
+      product: productId,
+      quantity,
+      variant: { color: colorName || '', label: sizeLabel || '' },
+    }))
+  )
 }
 
 /**
@@ -301,7 +391,7 @@ export async function createOrder(userId, payload) {
     isPublished: true,
   })
     .select(
-      'name channel price wholesalePrice wholesaleMoq qualities variants images sourceDesign colors'
+      'name channel price wholesalePrice wholesaleMoq qualities variants images sourceDesign colors stockByOption stock'
     )
     .lean()
 
@@ -376,6 +466,19 @@ export async function createOrder(userId, payload) {
         ? product.colors.find((c) => c.name === color)?.hex || ''
         : ''
     const colorHex = colorHexFromDesign || colorHexFromProduct || ''
+
+    if (product.stockByOption?.length) {
+      const sizeLabel = variant?.label || design?.variant?.size || ''
+      const cell = findStockOption(product.stockByOption, color || '', sizeLabel)
+      if (!cell || sellableQuantity(cell) < input.quantity) {
+        throw new AppError(
+          `Insufficient stock for ${product.name}${color ? ` (${color}` : ''}${sizeLabel ? `${color ? ', ' : ' ('}${sizeLabel}` : ''}${color || sizeLabel ? ')' : ''}`,
+          409,
+          'INSUFFICIENT_STOCK'
+        )
+      }
+    }
+
     const designPreview = design?.zones?.find((zone) => zone.previewUrl)?.previewUrl || ''
     const designSnapshot = design
       ? {
@@ -413,22 +516,33 @@ export async function createOrder(userId, payload) {
     })
   }
 
-  // Agrège les quantités par produit (même produit sur plusieurs lignes)
-  const qtyByProduct = new Map()
+  // Agrège par produit + couleur + taille (matrice stock).
+  const qtyByKey = new Map()
   for (const item of preparedItems) {
-    qtyByProduct.set(item._productId, (qtyByProduct.get(item._productId) || 0) + item.quantity)
+    const colorName = item.variant?.color || ''
+    const sizeLabel = item.variant?.label || ''
+    const key = `${item._productId}::${colorName}::${sizeLabel}`
+    const prev = qtyByKey.get(key)
+    if (prev) {
+      prev.quantity += item.quantity
+    } else {
+      qtyByKey.set(key, {
+        productId: item._productId,
+        quantity: item.quantity,
+        colorName,
+        sizeLabel,
+      })
+    }
   }
 
-  /** @type {{ productId: string, quantity: number }[]} */
+  /** @type {{ productId: string, quantity: number, colorName?: string, sizeLabel?: string }[]} */
   const decremented = []
 
   try {
-    // Décréments en parallèle — chaque succès est enregistré pour compensation
-    // même si un autre produit échoue (Promise.allSettled + re-throw).
     const settled = await Promise.allSettled(
-      [...qtyByProduct].map(async ([productId, quantity]) => {
-        await decrementStock(productId, quantity)
-        decremented.push({ productId, quantity })
+      [...qtyByKey.values()].map(async (entry) => {
+        await decrementStock(entry)
+        decremented.push(entry)
       })
     )
     const failure = settled.find((r) => r.status === 'rejected')

@@ -78,6 +78,25 @@ const colorSchema = z.object({
     .regex(/^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/, 'Invalid color hex'),
 })
 
+const stockByOptionSchema = z.object({
+  colorName: z.string().trim().max(80).default(''),
+  sizeLabel: z.string().trim().max(80).default(''),
+  quantity: z.coerce.number().int().min(0).default(0),
+})
+
+const stockByOptionListSchema = z
+  .array(stockByOptionSchema)
+  .max(200)
+  .refine(
+    (items) => {
+      const keys = items.map((c) => `${c.colorName}::${c.sizeLabel}`)
+      return new Set(keys).size === keys.length
+    },
+    { message: 'Duplicate color/size stock cells are not allowed' }
+  )
+  .optional()
+  .default([])
+
 const qualitySchema = z.object({
   key: z.enum(PRODUCT_QUALITY_KEYS),
   price: z.coerce.number().min(0, 'Quality price must be >= 0'),
@@ -202,6 +221,7 @@ const productBodyObjectSchema = z.object({
     .nullable(),
   variants: z.array(variantSchema).optional().default([]),
   colors: z.array(colorSchema).optional().default([]),
+  stockByOption: stockByOptionListSchema,
   qualities: qualitiesSchema,
   printAreas: printAreasSchema.optional().default([]),
 })
@@ -238,6 +258,7 @@ export function parseMultipartProductBody(body) {
   for (const key of [
     'variants',
     'colors',
+    'stockByOption',
     'qualities',
     'removeImagePublicIds',
     'printAreas',
