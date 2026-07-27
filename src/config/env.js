@@ -25,8 +25,9 @@ const envSchema = z.object({
   // Contact form → Google Sheets (Apps Script web app URL + shared secret)
   CONTACT_SHEETS_WEBHOOK_URL: z.string().optional().default(''),
   CONTACT_SHEETS_SECRET: z.string().optional().default(''),
-  // SMTP — emails transactionnels (Gmail App Password recommandé).
-  // Defaults: smtp.gmail.com:587 STARTTLS. Override for other providers.
+  // Resend HTTPS API — required on Railway Hobby (outbound SMTP is blocked).
+  RESEND_API_KEY: z.string().optional().default(''),
+  // SMTP — local / Pro only (Gmail App Password). Railway Hobby cannot use this.
   SMTP_HOST: z.string().optional().default('smtp.gmail.com'),
   SMTP_PORT: z.coerce.number().int().positive().default(587),
   SMTP_SECURE: z
@@ -51,7 +52,17 @@ function normalizeSmtpPass(password) {
 }
 
 /**
- * True when SMTP credentials look usable.
+ * @param {string} [key]
+ */
+function isValidResendApiKey(key) {
+  const value = String(key || '').trim()
+  if (!value) return false
+  if (/^re_x+$/i.test(value)) return false
+  if (/placeholder|changeme|your[_-]?key/i.test(value)) return false
+  return /^re_[A-Za-z0-9]{20,}$/.test(value)
+}
+
+/**
  * @param {{ SMTP_USER?: string, SMTP_PASS?: string }} data
  */
 function hasSmtpConfig(data) {
@@ -60,14 +71,22 @@ function hasSmtpConfig(data) {
   return Boolean(user.includes('@') && pass.length >= 8)
 }
 
+/**
+ * @param {{ RESEND_API_KEY?: string, SMTP_USER?: string, SMTP_PASS?: string }} data
+ */
+function hasAnyMailTransport(data) {
+  return isValidResendApiKey(data?.RESEND_API_KEY) || hasSmtpConfig(data)
+}
+
 const parsed = envSchema
   .refine((data) => data.JWT_ACCESS_SECRET !== data.JWT_REFRESH_SECRET, {
     message: 'JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be different',
     path: ['JWT_REFRESH_SECRET'],
   })
-  .refine((data) => data.NODE_ENV !== 'production' || hasSmtpConfig(data), {
-    message: 'SMTP_USER and SMTP_PASS are required in production',
-    path: ['SMTP_PASS'],
+  .refine((data) => data.NODE_ENV !== 'production' || hasAnyMailTransport(data), {
+    message:
+      'Production requires RESEND_API_KEY (recommended on Railway) or SMTP_USER + SMTP_PASS',
+    path: ['RESEND_API_KEY'],
   })
   .refine(
     (data) =>
@@ -80,7 +99,6 @@ const parsed = envSchema
   )
   .safeParse({
     ...process.env,
-    // Compat: anciens noms GMAIL_* → SMTP_*
     SMTP_USER: process.env.SMTP_USER || process.env.GMAIL_USER,
     SMTP_PASS: process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD,
     SMTP_FROM: process.env.SMTP_FROM || process.env.MAIL_FROM,
@@ -115,15 +133,23 @@ export const isContactSheetsConfigured = Boolean(
   env.CONTACT_SHEETS_WEBHOOK_URL && env.CONTACT_SHEETS_SECRET
 )
 
-/** SMTP prêt si user + password sont valides. */
-export const isMailConfigured = hasSmtpConfig(env)
+export const isResendConfigured = isValidResendApiKey(env.RESEND_API_KEY)
+export const isSmtpConfigured = hasSmtpConfig(env)
+/** Au moins un transport mail utilisable. */
+export const isMailConfigured = isResendConfigured || isSmtpConfigured
+
+if (env.NODE_ENV === 'production' && isSmtpConfigured && !isResendConfigured) {
+  console.warn(
+    '[mail] Using SMTP only — Railway Hobby blocks outbound SMTP (587/465). Prefer RESEND_API_KEY (HTTPS).'
+  )
+}
 
 if (
   env.NODE_ENV !== 'production' &&
-  (env.SMTP_PASS || process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD) &&
+  (env.SMTP_PASS || env.RESEND_API_KEY) &&
   !isMailConfigured
 ) {
   console.warn(
-    '[mail] SMTP incomplete (need SMTP_USER + SMTP_PASS) — emails skipped; reset links logged in console'
+    '[mail] Mail incomplete — emails skipped; reset links logged in console'
   )
 }
