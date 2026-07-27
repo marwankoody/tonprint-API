@@ -1,12 +1,23 @@
+import { Resend } from 'resend'
 import nodemailer from 'nodemailer'
-import { env, isMailConfigured } from '../../config/env.js'
+import { env, isMailConfigured, isResendConfigured } from '../../config/env.js'
+
+/** @type {Resend | null} */
+let resendClient = null
 
 /** @type {import('nodemailer').Transporter | null} */
-let transporter = null
+let smtpTransporter = null
 
-function getTransporter() {
-  if (!transporter) {
-    transporter = nodemailer.createTransport({
+function getResend() {
+  if (!resendClient) {
+    resendClient = new Resend(env.RESEND_API_KEY)
+  }
+  return resendClient
+}
+
+function getSmtpTransporter() {
+  if (!smtpTransporter) {
+    smtpTransporter = nodemailer.createTransport({
       host: env.SMTP_HOST,
       port: env.SMTP_PORT,
       secure: env.SMTP_SECURE,
@@ -17,11 +28,11 @@ function getTransporter() {
       },
     })
   }
-  return transporter
+  return smtpTransporter
 }
 
 /**
- * Envoie un email via Gmail SMTP (Nodemailer).
+ * Envoie un email : Resend (HTTPS) en priorité, sinon SMTP local.
  * Sans credentials : skip (en dev, log sujet + destinataire).
  *
  * @param {{ to: string, subject: string, html: string, text: string }} opts
@@ -29,18 +40,38 @@ function getTransporter() {
 export async function sendMail({ to, subject, html, text }) {
   if (!isMailConfigured) {
     if (env.NODE_ENV !== 'production') {
-      console.info('[mail] SMTP not configured — email skipped', {
+      console.info('[mail] not configured — email skipped', {
         to,
         subject,
-        from: env.SMTP_FROM,
+        from: env.MAIL_FROM || env.SMTP_FROM,
       })
     }
     return { skipped: true }
   }
 
   try {
-    const info = await getTransporter().sendMail({
-      from: env.SMTP_FROM,
+    if (isResendConfigured) {
+      const { data, error } = await getResend().emails.send({
+        from: env.MAIL_FROM,
+        to: [to],
+        subject,
+        html,
+        text,
+      })
+
+      if (error) {
+        throw new Error(error.message || 'Resend send failed')
+      }
+
+      if (env.NODE_ENV !== 'production') {
+        console.info('[mail] sent via Resend', { to, subject, id: data?.id })
+      }
+
+      return data
+    }
+
+    const info = await getSmtpTransporter().sendMail({
+      from: env.SMTP_FROM || env.MAIL_FROM,
       to,
       subject,
       html,
@@ -48,7 +79,7 @@ export async function sendMail({ to, subject, html, text }) {
     })
 
     if (env.NODE_ENV !== 'production') {
-      console.info('[mail] sent', {
+      console.info('[mail] sent via SMTP', {
         to,
         subject,
         messageId: info.messageId,
@@ -57,7 +88,7 @@ export async function sendMail({ to, subject, html, text }) {
 
     return info
   } catch (err) {
-    console.error('[mail] SMTP send failed:', err?.message || err)
+    console.error('[mail] send failed:', err?.message || err)
     throw err
   }
 }

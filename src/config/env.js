@@ -19,7 +19,10 @@ const envSchema = z.object({
   CLOUDINARY_API_SECRET: z.string().optional().default(''),
   CONTACT_SHEETS_WEBHOOK_URL: z.string().optional().default(''),
   CONTACT_SHEETS_SECRET: z.string().optional().default(''),
-  // Gmail SMTP (App Password) — obligatoire en production
+  // Resend (HTTPS) — obligatoire en production (Railway Hobby bloque SMTP)
+  RESEND_API_KEY: z.string().optional().default(''),
+  MAIL_FROM: z.string().optional().default('TonPrint <onboarding@resend.dev>'),
+  // SMTP optionnel — fallback local uniquement (Gmail App Password)
   SMTP_HOST: z.string().optional().default('smtp.gmail.com'),
   SMTP_PORT: z.coerce.number().int().positive().default(587),
   SMTP_SECURE: z
@@ -36,6 +39,10 @@ function normalizeSmtpPass(password) {
   return String(password || '').replace(/\s+/g, '')
 }
 
+function hasResendConfig(data) {
+  return String(data?.RESEND_API_KEY || '').trim().length >= 20
+}
+
 function hasSmtpConfig(data) {
   const user = String(data?.SMTP_USER || '').trim()
   const pass = normalizeSmtpPass(data?.SMTP_PASS)
@@ -47,9 +54,9 @@ const parsed = envSchema
     message: 'JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be different',
     path: ['JWT_REFRESH_SECRET'],
   })
-  .refine((data) => data.NODE_ENV !== 'production' || hasSmtpConfig(data), {
-    message: 'SMTP_USER and SMTP_PASS are required in production (password reset emails)',
-    path: ['SMTP_PASS'],
+  .refine((data) => data.NODE_ENV !== 'production' || hasResendConfig(data), {
+    message: 'RESEND_API_KEY is required in production (HTTPS email; SMTP blocked on Railway Hobby)',
+    path: ['RESEND_API_KEY'],
   })
   .safeParse(process.env)
 
@@ -64,6 +71,8 @@ if (!parsed.success) {
 /** @type {z.infer<typeof envSchema>} */
 export const env = {
   ...parsed.data,
+  RESEND_API_KEY: String(parsed.data.RESEND_API_KEY || '').trim(),
+  MAIL_FROM: String(parsed.data.MAIL_FROM || '').trim() || 'TonPrint <onboarding@resend.dev>',
   SMTP_PASS: normalizeSmtpPass(parsed.data.SMTP_PASS),
   SMTP_FROM:
     String(parsed.data.SMTP_FROM || '').trim() ||
@@ -84,5 +93,8 @@ export const isContactSheetsConfigured = Boolean(
   env.CONTACT_SHEETS_WEBHOOK_URL && env.CONTACT_SHEETS_SECRET
 )
 
-/** Gmail SMTP prêt. */
-export const isMailConfigured = hasSmtpConfig(env)
+export const isResendConfigured = hasResendConfig(env)
+export const isSmtpConfigured = hasSmtpConfig(env)
+
+/** Au moins un transport email prêt (Resend prioritaire, SMTP en fallback local). */
+export const isMailConfigured = isResendConfigured || isSmtpConfigured
