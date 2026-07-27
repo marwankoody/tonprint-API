@@ -138,10 +138,12 @@ export const isSmtpConfigured = hasSmtpConfig(env)
 /** Au moins un transport mail utilisable. */
 export const isMailConfigured = isResendConfigured || isSmtpConfigured
 
-if (env.NODE_ENV === 'production' && isSmtpConfigured && !isResendConfigured) {
-  console.warn(
-    '[mail] Using SMTP only — Railway Hobby blocks outbound SMTP (587/465). Prefer RESEND_API_KEY (HTTPS).'
+if (env.NODE_ENV === 'production' && !isResendConfigured) {
+  console.error(
+    '[mail] FATAL for email delivery: RESEND_API_KEY missing. Railway Hobby blocks SMTP — password-reset emails will fail until RESEND_API_KEY is set. Use SMTP_FROM=TonPrint <beth.t@example.com> for tests (not @gmail.com).'
   )
+} else if (env.NODE_ENV === 'production' && isResendConfigured) {
+  console.info('[mail] transport: resend (HTTPS)')
 }
 
 if (

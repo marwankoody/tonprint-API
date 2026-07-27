@@ -36,10 +36,21 @@ function getSmtpTransporter() {
   return transporter
 }
 
+function fromLooksLikeGmail(from) {
+  return /@gmail\.com>?/i.test(String(from || ''))
+}
+
 /**
  * Envoi via Resend HTTPS (fonctionne sur Railway Hobby — SMTP y est bloqué).
  */
 async function sendViaResend({ to, subject, html, text }) {
+  // Resend n'autorise pas d'envoyer "from" une adresse @gmail.com non vérifiée.
+  if (fromLooksLikeGmail(env.SMTP_FROM)) {
+    throw new Error(
+      'Resend cannot send from @gmail.com. Set SMTP_FROM=TonPrint <beth.t@example.com> (tests) or verify tonprint.ma and use noreply@tonprint.ma'
+    )
+  }
+
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
@@ -70,7 +81,7 @@ async function sendViaResend({ to, subject, html, text }) {
 }
 
 /**
- * Envoie un email : Resend (HTTPS) en priorité, sinon SMTP.
+ * Envoie un email : Resend (HTTPS) en priorité, sinon SMTP (local uniquement).
  *
  * @param {{
  *   to: string,
@@ -88,6 +99,21 @@ export async function sendMail({ to, subject, html, text, debugPayload }) {
       ...debugPayload,
     })
     return { skipped: true }
+  }
+
+  // Railway Hobby blocks SMTP — never wait for ETIMEDOUT in production.
+  if (env.NODE_ENV === 'production' && !isResendConfigured) {
+    const err = new Error(
+      'RESEND_API_KEY is required in production on Railway (SMTP ports 587/465 are blocked). Add RESEND_API_KEY and set SMTP_FROM=TonPrint <beth.t@example.com> until tonprint.ma is verified on Resend.'
+    )
+    console.error('[mail] send failed', {
+      transport: 'none',
+      to,
+      resendConfigured: false,
+      smtpConfigured: isSmtpConfigured,
+      message: err.message,
+    })
+    throw err
   }
 
   const transport = isResendConfigured ? 'resend' : 'smtp'
