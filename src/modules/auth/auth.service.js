@@ -223,7 +223,6 @@ export async function requestPasswordReset(email) {
   )
 
   if (!user || user.isActive === false) {
-    console.info('[mail] password reset skipped (no active user for email)')
     return
   }
 
@@ -234,17 +233,6 @@ export async function requestPasswordReset(email) {
 
   const resetUrl = `${env.FRONTEND_URL.replace(/\/$/, '')}/reset-password?token=${rawToken}`
   const { subject, html, text } = passwordResetEmail({ name: user.name, resetUrl })
-
-  console.info('[mail] password reset queued', {
-    to: user.email,
-    frontendHost: (() => {
-      try {
-        return new URL(env.FRONTEND_URL).host
-      } catch {
-        return 'invalid'
-      }
-    })(),
-  })
 
   void sendMail({
     to: user.email,
