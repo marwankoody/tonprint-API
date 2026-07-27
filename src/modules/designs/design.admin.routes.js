@@ -38,4 +38,10 @@ router.post(
   designController.rejectDesign
 )
 
+router.delete(
+  '/:id',
+  validate(designIdParamSchema, 'params'),
+  designController.adminDeleteDesign
+)
+
 export default router

@@ -44,6 +44,8 @@ export const listOrdersQuerySchema = z.object({
     .string()
     .refine((val) => ORDER_STATUSES.includes(val), { message: 'Invalid status' })
     .optional(),
+  /** `returns` = cancelled + returned (espace « Mes retours »). */
+  filter: z.enum(['returns']).optional(),
   channel: z
     .string()
     .refine((val) => ORDER_CHANNELS.includes(val), { message: 'Invalid channel' })

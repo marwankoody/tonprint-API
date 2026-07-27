@@ -74,3 +74,9 @@ export const rejectDesign = asyncHandler(async (req, res) => {
   const design = await designService.rejectDesign(id, req.body.reason)
   res.status(200).json({ success: true, data: { design } })
 })
+
+export const adminDeleteDesign = asyncHandler(async (req, res) => {
+  const { id } = req.validatedParams ?? req.params
+  const result = await designService.adminDeleteDesign(id)
+  res.status(200).json({ success: true, data: result })
+})

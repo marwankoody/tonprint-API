@@ -9,7 +9,16 @@ export const ORDER_STATUSES = Object.freeze([
   'shipped',
   'delivered',
   'cancelled',
+  'returned',
 ])
+
+/** Annulation + retour client (espace « Mes retours »). */
+export const RETURN_ORDER_STATUSES = Object.freeze(['cancelled', 'returned'])
+
+/** Commandes actives (hors retours). */
+export const ACTIVE_ORDER_STATUSES = Object.freeze(
+  ORDER_STATUSES.filter((s) => !RETURN_ORDER_STATUSES.includes(s))
+)
 
 /**
  * Canal de la commande (snapshot à la création) :
@@ -23,9 +32,10 @@ export const ORDER_CHANNELS = Object.freeze(['marketplace', 'personalization', '
 export const ORDER_STATUS_TRANSITIONS = Object.freeze({
   pending_delivery: ['processing', 'cancelled'],
   processing: ['shipped', 'cancelled'],
-  shipped: ['delivered'],
-  delivered: [],
+  shipped: ['delivered', 'returned'],
+  delivered: ['returned'],
   cancelled: [],
+  returned: [],
 })
 
 const variantSnapshotSchema = new Schema(
@@ -176,6 +186,11 @@ const orderSchema = new Schema(
       default: 'cod',
     },
     cancelledAt: {
+      type: Date,
+      default: null,
+    },
+    /** Date du retour client (refus / retour livreur après expédition ou livraison). */
+    returnedAt: {
       type: Date,
       default: null,
     },

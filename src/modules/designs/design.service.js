@@ -29,6 +29,13 @@ function formatDesign(design, options = {}) {
           category: design.product.category,
           subcategory: design.product.subcategory,
           price: design.product.price,
+          // Nécessaires au snapshot panier côté client (prix qualité + delta taille).
+          qualities: design.product.qualities || [],
+          variants: (design.product.variants || []).map((v) => ({
+            label: v.label,
+            priceDelta: v.priceDelta || 0,
+            sku: v.sku || undefined,
+          })),
         }
       : null
 
@@ -230,7 +237,7 @@ export async function listMyDesigns(userId, query) {
       .sort({ updatedAt: -1 })
       .skip(skip)
       .limit(limit)
-      .populate('product', 'name category subcategory price')
+      .populate('product', 'name category subcategory price qualities variants')
       .lean(),
     Design.countDocuments(filter),
   ])
@@ -252,7 +259,7 @@ export async function getMyDesignById(designId, userId) {
   }
 
   const design = await Design.findById(designId)
-    .populate('product', 'name category subcategory price')
+    .populate('product', 'name category subcategory price qualities variants')
     .lean()
 
   if (!design) {
@@ -266,7 +273,38 @@ export async function getMyDesignById(designId, userId) {
 }
 
 /**
- * Supprime un design et nettoie ses assets Cloudinary (previews + fichiers d'impression).
+ * Suppression définitive d'un design + assets Cloudinary (previews / print).
+ * Détache aussi `sourceDesign` sur les produits marketplace liés.
+ * Les commandes gardent leurs snapshots.
+ * @param {import('mongoose').Document | object} design — doc ou lean avec zones.publicIds
+ */
+async function hardDeleteDesignRecord(design) {
+  const designId = design._id
+  const publicIds = [...new Set(collectAssetPublicIds(design))]
+
+  await Product.updateMany(
+    { sourceDesign: designId },
+    { $set: { sourceDesign: null, creator: null } }
+  )
+
+  await Design.deleteOne({ _id: designId })
+
+  if (publicIds.length) {
+    try {
+      await deleteCloudinaryImages(publicIds)
+    } catch (err) {
+      console.error(
+        `[designs] Cloudinary cleanup failed for design ${designId} (${publicIds.length} assets):`,
+        err?.message || err
+      )
+    }
+  }
+
+  return { deleted: true, id: String(designId) }
+}
+
+/**
+ * Supprime un design appartenant à l'utilisateur + nettoie Cloudinary.
  * Les images importées (`designs/uploads`) sont conservées : elles peuvent être
  * référencées par d'autres designs du créateur.
  *
@@ -275,15 +313,24 @@ export async function getMyDesignById(designId, userId) {
  */
 export async function deleteDesign(designId, userId) {
   const design = await findOwnedDesign(designId, userId, { select: '-zones.canvasJson' })
-  const publicIds = collectAssetPublicIds(design)
+  return hardDeleteDesignRecord(design)
+}
 
-  await design.deleteOne()
-
-  if (publicIds.length) {
-    deleteCloudinaryImages(publicIds).catch(() => {
-      // Nettoyage best-effort.
-    })
+/**
+ * Suppression admin (tout design, sans contrainte d'ownership).
+ * @param {string} designId
+ */
+export async function adminDeleteDesign(designId) {
+  if (!mongoose.isValidObjectId(designId)) {
+    throw new AppError('Invalid design id', 400, 'INVALID_ID')
   }
+
+  const design = await Design.findById(designId).select('-zones.canvasJson')
+  if (!design) {
+    throw new AppError('Design not found', 404, 'DESIGN_NOT_FOUND')
+  }
+
+  return hardDeleteDesignRecord(design)
 }
 
 /**

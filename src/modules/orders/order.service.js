@@ -1,6 +1,6 @@
 import mongoose from 'mongoose'
 import crypto from 'crypto'
-import { Order, ORDER_STATUS_TRANSITIONS } from './order.model.js'
+import { Order, ORDER_STATUS_TRANSITIONS, RETURN_ORDER_STATUSES } from './order.model.js'
 import { Product } from '../products/product.model.js'
 import { Design } from '../designs/design.model.js'
 import { User } from '../auth/user.model.js'
@@ -78,6 +78,7 @@ function formatOrder(order, userId, options = {}) {
     deliveryAddress: order.deliveryAddress,
     paymentMethod: order.paymentMethod || 'cod',
     cancelledAt: order.cancelledAt,
+    returnedAt: order.returnedAt,
     createdAt: order.createdAt,
     updatedAt: order.updatedAt,
   }
@@ -599,7 +600,15 @@ export async function listMyOrders(userId, query) {
   const { page, limit, skip } = parsePagination(query, { maxLimit: 20, defaultLimit: 15 })
   const filter = { user: userId }
 
-  if (query.status) filter.status = query.status
+  // « Mes retours » : annulations + retours client.
+  if (query.filter === 'returns') {
+    filter.status = { $in: [...RETURN_ORDER_STATUSES] }
+  } else if (query.status) {
+    filter.status = query.status
+  } else {
+    // Liste commandes actives : hors annulations / retours.
+    filter.status = { $nin: [...RETURN_ORDER_STATUSES] }
+  }
 
   if (query.channel === 'personalization') {
     filter.channel = { $in: ['personalization', 'mixed'] }
@@ -838,12 +847,16 @@ export async function updateOrderStatus(orderId, nextStatus, adminId) {
     )
   }
 
-  if (nextStatus === 'cancelled') {
+  if (nextStatus === 'cancelled' || nextStatus === 'returned') {
     await restoreStock(order.items)
-    order.cancelledAt = new Date()
-    if (order.paymentMethod === 'points' && (order.pointsSpent || 0) > 0) {
-      const { refundPointsForCancelledOrder } = await import('../points/points.service.js')
-      await refundPointsForCancelledOrder(order)
+    if (nextStatus === 'cancelled') {
+      order.cancelledAt = new Date()
+      if (order.paymentMethod === 'points' && (order.pointsSpent || 0) > 0) {
+        const { refundPointsForCancelledOrder } = await import('../points/points.service.js')
+        await refundPointsForCancelledOrder(order)
+      }
+    } else {
+      order.returnedAt = new Date()
     }
   }
 
@@ -857,8 +870,7 @@ export async function updateOrderStatus(orderId, nextStatus, adminId) {
   })
   await order.save()
 
-  // Sécurité points : credits paliers UNIQUEMENT ici, au passage admin → delivered.
-  // Aucun endpoint client ne peut déclencher awardMilestonesForDeliveredOrder.
+  // Credits paliers uniquement au passage admin → delivered.
   if (nextStatus === 'delivered') {
     const { awardMilestonesForDeliveredOrder } = await import('../points/points.service.js')
     await awardMilestonesForDeliveredOrder(order)
