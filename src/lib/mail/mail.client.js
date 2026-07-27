@@ -10,6 +10,8 @@ function getTransporter() {
       host: env.SMTP_HOST,
       port: env.SMTP_PORT,
       secure: env.SMTP_SECURE,
+      // Force IPv4 — many hosts have no routable IPv6 (ENETUNREACH on smtp.gmail.com).
+      family: 4,
       auth: {
         user: env.SMTP_USER,
         pass: env.SMTP_PASS,
