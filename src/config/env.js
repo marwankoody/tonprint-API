@@ -60,12 +60,7 @@ const parsed = envSchema
       path: ['FRONTEND_URL'],
     }
   )
-  .safeParse({
-    ...process.env,
-    SMTP_USER: process.env.SMTP_USER || process.env.GMAIL_USER,
-    SMTP_PASS: process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD,
-    SMTP_FROM: process.env.SMTP_FROM || process.env.MAIL_FROM,
-  })
+  .safeParse(process.env)
 
 if (!parsed.success) {
   console.error('❌ Invalid environment variables:')

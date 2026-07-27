@@ -91,7 +91,7 @@ const userSchema = new Schema(
       default: null,
       select: false,
     },
-    /** SHA-256 du token de reset (jamais le token clair). */
+    /** SHA-256 du code OTP de reset (jamais le code clair). */
     passwordResetTokenHash: {
       type: String,
       default: null,
@@ -100,6 +100,11 @@ const userSchema = new Schema(
     passwordResetExpires: {
       type: Date,
       default: null,
+      select: false,
+    },
+    passwordResetAttempts: {
+      type: Number,
+      default: 0,
       select: false,
     },
   },

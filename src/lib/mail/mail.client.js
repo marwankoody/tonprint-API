@@ -22,7 +22,7 @@ function getTransporter() {
 
 /**
  * Envoie un email via Gmail SMTP (Nodemailer).
- * Sans credentials : skip (dev log du lien reset si debugPayload fourni).
+ * Sans credentials : skip (en dev, log sujet + destinataire + debugPayload optionnel).
  *
  * @param {{
  *   to: string,

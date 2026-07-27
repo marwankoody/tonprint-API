@@ -86,10 +86,16 @@ export const forgotPasswordSchema = z.object({
 
 export const resetPasswordSchema = z
   .object({
-    token: z
+    email: z
       .string()
       .trim()
-      .regex(/^[a-f0-9]{64}$/i, 'Invalid reset token'),
+      .toLowerCase()
+      .email('Invalid email address')
+      .max(254, 'Email must be at most 254 characters'),
+    code: z
+      .string()
+      .trim()
+      .regex(/^\d{6}$/, 'Code must be 6 digits'),
     newPassword: z.string().min(8, 'Password must be at least 8 characters').max(72),
     confirmPassword: z.string().min(1, 'Password confirmation is required').max(72),
   })

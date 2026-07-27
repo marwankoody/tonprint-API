@@ -5,17 +5,45 @@ import { AppError } from '../../utils/AppError.js'
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../../utils/jwt.js'
 import { env } from '../../config/env.js'
 import { sendMail } from '../../lib/mail/mail.client.js'
-import { passwordResetEmail } from '../../lib/mail/mail.templates.js'
+import { passwordResetOtpEmail } from '../../lib/mail/mail.templates.js'
 
 const PASSWORD_SALT_ROUNDS = 12
 const REFRESH_TOKEN_SALT_ROUNDS = 10
-const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000
+const PASSWORD_RESET_TTL_MS = 10 * 60 * 1000
+const PASSWORD_RESET_MAX_ATTEMPTS = 5
 
 /**
- * @param {string} rawToken
+ * @param {string} code
  */
-function hashResetToken(rawToken) {
-  return crypto.createHash('sha256').update(rawToken).digest('hex')
+function hashResetOtp(code) {
+  return crypto
+    .createHmac('sha256', env.JWT_ACCESS_SECRET)
+    .update(String(code))
+    .digest('hex')
+}
+
+/**
+ * @param {string} aHex
+ * @param {string} bHex
+ */
+function timingSafeEqualHex(aHex, bHex) {
+  const a = Buffer.from(String(aHex), 'utf8')
+  const b = Buffer.from(String(bHex), 'utf8')
+  if (a.length !== b.length) return false
+  return crypto.timingSafeEqual(a, b)
+}
+
+function generateOtpCode() {
+  return String(crypto.randomInt(0, 1_000_000)).padStart(6, '0')
+}
+
+/**
+ * @param {import('mongoose').Document} user
+ */
+function clearPasswordReset(user) {
+  user.passwordResetTokenHash = null
+  user.passwordResetExpires = null
+  user.passwordResetAttempts = 0
 }
 
 // Hash bcrypt d'une valeur factice, comparé quand l'email n'existe pas, pour que
@@ -212,57 +240,77 @@ export async function changePassword(userId, { currentPassword, newPassword }) {
 }
 
 /**
- * Demande de reset — réponse toujours générique (anti-énumération).
+ * Demande de reset OTP — réponse toujours générique (anti-énumération).
  * Email envoyé en fire-and-forget si le compte existe et est actif.
  * @param {string} email
  */
 export async function requestPasswordReset(email) {
   const normalized = String(email || '').trim().toLowerCase()
   const user = await User.findOne({ email: normalized }).select(
-    '+passwordResetTokenHash +passwordResetExpires'
+    '+passwordResetTokenHash +passwordResetExpires +passwordResetAttempts'
   )
 
   if (!user || user.isActive === false) {
     return
   }
 
-  const rawToken = crypto.randomBytes(32).toString('hex')
-  user.passwordResetTokenHash = hashResetToken(rawToken)
+  const code = generateOtpCode()
+  user.passwordResetTokenHash = hashResetOtp(code)
   user.passwordResetExpires = new Date(Date.now() + PASSWORD_RESET_TTL_MS)
+  user.passwordResetAttempts = 0
   await user.save()
 
-  const resetUrl = `${env.FRONTEND_URL.replace(/\/$/, '')}/reset-password?token=${rawToken}`
-  const { subject, html, text } = passwordResetEmail({ name: user.name, resetUrl })
+  const { subject, html, text } = passwordResetOtpEmail({ name: user.name, code })
 
   void sendMail({
     to: user.email,
     subject,
     html,
     text,
-    debugPayload:
-      env.NODE_ENV !== 'production' ? { resetUrl } : undefined,
   }).catch((err) => {
     console.error('[mail] password reset send failed:', err?.message || err)
   })
 }
 
 /**
- * @param {{ token: string, newPassword: string }} input
+ * @param {{ email: string, code: string, newPassword: string }} input
  */
-export async function resetPassword({ token, newPassword }) {
-  const tokenHash = hashResetToken(token)
-  const user = await User.findOne({
-    passwordResetTokenHash: tokenHash,
-    passwordResetExpires: { $gt: new Date() },
-  }).select('+password +passwordResetTokenHash +passwordResetExpires +refreshTokenHash')
+export async function resetPassword({ email, code, newPassword }) {
+  const normalized = String(email || '').trim().toLowerCase()
+  const user = await User.findOne({ email: normalized }).select(
+    '+password +passwordResetTokenHash +passwordResetExpires +passwordResetAttempts +refreshTokenHash'
+  )
 
-  if (!user || user.isActive === false) {
-    throw new AppError('Invalid or expired reset token', 400, 'INVALID_RESET_TOKEN')
+  if (!user || user.isActive === false || !user.passwordResetTokenHash || !user.passwordResetExpires) {
+    throw new AppError('Invalid or expired reset code', 400, 'INVALID_RESET_CODE')
+  }
+
+  if (user.passwordResetExpires.getTime() <= Date.now()) {
+    clearPasswordReset(user)
+    await user.save()
+    throw new AppError('Invalid or expired reset code', 400, 'INVALID_RESET_CODE')
+  }
+
+  if ((user.passwordResetAttempts || 0) >= PASSWORD_RESET_MAX_ATTEMPTS) {
+    clearPasswordReset(user)
+    await user.save()
+    throw new AppError('Too many invalid attempts', 400, 'TOO_MANY_RESET_ATTEMPTS')
+  }
+
+  const codeHash = hashResetOtp(code)
+  if (!timingSafeEqualHex(codeHash, user.passwordResetTokenHash)) {
+    user.passwordResetAttempts = (user.passwordResetAttempts || 0) + 1
+    if (user.passwordResetAttempts >= PASSWORD_RESET_MAX_ATTEMPTS) {
+      clearPasswordReset(user)
+      await user.save()
+      throw new AppError('Too many invalid attempts', 400, 'TOO_MANY_RESET_ATTEMPTS')
+    }
+    await user.save()
+    throw new AppError('Invalid or expired reset code', 400, 'INVALID_RESET_CODE')
   }
 
   user.password = await bcrypt.hash(newPassword, PASSWORD_SALT_ROUNDS)
-  user.passwordResetTokenHash = null
-  user.passwordResetExpires = null
+  clearPasswordReset(user)
   user.refreshTokenHash = null
   await user.save()
 
