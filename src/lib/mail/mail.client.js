@@ -7,12 +7,12 @@ let transporter = null
 function getTransporter() {
   if (!transporter) {
     transporter = nodemailer.createTransport({
-      host: 'smtp.gmail.com',
-      port: 465,
-      secure: true,
+      host: env.SMTP_HOST,
+      port: env.SMTP_PORT,
+      secure: env.SMTP_SECURE,
       auth: {
-        user: env.GMAIL_USER,
-        pass: env.GMAIL_APP_PASSWORD,
+        user: env.SMTP_USER,
+        pass: env.SMTP_PASS,
       },
     })
   }
@@ -20,7 +20,7 @@ function getTransporter() {
 }
 
 /**
- * Envoie un email via Gmail SMTP (Nodemailer).
+ * Envoie un email via SMTP (Nodemailer).
  * Sans credentials valides (dev) : log le sujet + destinataire (+ debugPayload), pas d’erreur.
  *
  * @param {{
@@ -34,15 +34,15 @@ function getTransporter() {
 export async function sendMail({ to, subject, html, text, debugPayload }) {
   if (!isMailConfigured) {
     if (env.NODE_ENV !== 'production') {
-      console.info('[mail] Gmail SMTP not configured — email skipped (dev)')
-      console.info('[mail]', { to, subject, from: env.MAIL_FROM, ...debugPayload })
+      console.info('[mail] SMTP not configured — email skipped (dev)')
+      console.info('[mail]', { to, subject, from: env.SMTP_FROM, ...debugPayload })
     }
     return { skipped: true }
   }
 
   try {
     const info = await getTransporter().sendMail({
-      from: env.MAIL_FROM,
+      from: env.SMTP_FROM,
       to,
       subject,
       html,
@@ -60,9 +60,11 @@ export async function sendMail({ to, subject, html, text, debugPayload }) {
 
     return info
   } catch (err) {
-    console.error('[mail] Gmail SMTP send failed', {
+    console.error('[mail] SMTP send failed', {
       to,
-      from: env.MAIL_FROM,
+      from: env.SMTP_FROM,
+      host: env.SMTP_HOST,
+      port: env.SMTP_PORT,
       code: err?.code,
       responseCode: err?.responseCode,
       response: err?.response,
