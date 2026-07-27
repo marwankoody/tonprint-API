@@ -64,6 +64,17 @@ export const devisFormLimiter = rateLimit({
 export const contactFormLimiter = devisFormLimiter
 
 /**
+ * Mot de passe oublié / reset : 5 tentatives / 15 min / IP
+ * (compte aussi les succès — anti-abus email + brute-force token).
+ */
+export const passwordResetLimiter = rateLimit({
+  ...commonOptions,
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  skipSuccessfulRequests: false,
+})
+
+/**
  * Limiteur des uploads de l'éditeur de designs (images importées + exports
  * par zone à l'enregistrement) : protège le quota Cloudinary.
  * Un enregistrement peut compter jusqu'à ~10 requêtes (images + 5 zones).

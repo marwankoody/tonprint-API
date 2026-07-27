@@ -59,3 +59,21 @@ export const changePassword = asyncHandler(async (req, res) => {
     message: 'Password updated successfully. Please log in again.',
   })
 })
+
+export const forgotPassword = asyncHandler(async (req, res) => {
+  await authService.requestPasswordReset(req.body.email)
+  res.status(200).json({
+    success: true,
+    message:
+      'If an account exists for this email, a reset link has been sent.',
+  })
+})
+
+export const resetPassword = asyncHandler(async (req, res) => {
+  await authService.resetPassword(req.body)
+  res.clearCookie(REFRESH_COOKIE_NAME, getRefreshCookieOptions())
+  res.status(200).json({
+    success: true,
+    message: 'Password reset successfully. Please log in.',
+  })
+})

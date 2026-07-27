@@ -1,10 +1,22 @@
+import crypto from 'crypto'
 import bcrypt from 'bcryptjs'
 import { User, normalizeRoles } from './user.model.js'
 import { AppError } from '../../utils/AppError.js'
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../../utils/jwt.js'
+import { env } from '../../config/env.js'
+import { sendMail } from '../../lib/mail/mail.client.js'
+import { passwordResetEmail } from '../../lib/mail/mail.templates.js'
 
 const PASSWORD_SALT_ROUNDS = 12
 const REFRESH_TOKEN_SALT_ROUNDS = 10
+const PASSWORD_RESET_TTL_MS = 60 * 60 * 1000
+
+/**
+ * @param {string} rawToken
+ */
+function hashResetToken(rawToken) {
+  return crypto.createHash('sha256').update(rawToken).digest('hex')
+}
 
 // Hash bcrypt d'une valeur factice, comparé quand l'email n'existe pas, pour que
 // le login prenne le même temps que l'email existe ou non (anti user-enumeration
@@ -197,4 +209,62 @@ export async function changePassword(userId, { currentPassword, newPassword }) {
   await user.save()
 
   return true
+}
+
+/**
+ * Demande de reset — réponse toujours générique (anti-énumération).
+ * Email envoyé en fire-and-forget si le compte existe et est actif.
+ * @param {string} email
+ */
+export async function requestPasswordReset(email) {
+  const normalized = String(email || '').trim().toLowerCase()
+  const user = await User.findOne({ email: normalized }).select(
+    '+passwordResetTokenHash +passwordResetExpires'
+  )
+
+  if (!user || user.isActive === false) {
+    return
+  }
+
+  const rawToken = crypto.randomBytes(32).toString('hex')
+  user.passwordResetTokenHash = hashResetToken(rawToken)
+  user.passwordResetExpires = new Date(Date.now() + PASSWORD_RESET_TTL_MS)
+  await user.save()
+
+  const resetUrl = `${env.FRONTEND_URL.replace(/\/$/, '')}/reset-password?token=${rawToken}`
+  const { subject, html, text } = passwordResetEmail({ name: user.name, resetUrl })
+
+  void sendMail({
+    to: user.email,
+    subject,
+    html,
+    text,
+    debugPayload:
+      env.NODE_ENV !== 'production' ? { resetUrl } : undefined,
+  }).catch((err) => {
+    console.error('[mail] password reset send failed:', err?.message || err)
+  })
+}
+
+/**
+ * @param {{ token: string, newPassword: string }} input
+ */
+export async function resetPassword({ token, newPassword }) {
+  const tokenHash = hashResetToken(token)
+  const user = await User.findOne({
+    passwordResetTokenHash: tokenHash,
+    passwordResetExpires: { $gt: new Date() },
+  }).select('+password +passwordResetTokenHash +passwordResetExpires +refreshTokenHash')
+
+  if (!user || user.isActive === false) {
+    throw new AppError('Invalid or expired reset token', 400, 'INVALID_RESET_TOKEN')
+  }
+
+  user.password = await bcrypt.hash(newPassword, PASSWORD_SALT_ROUNDS)
+  user.passwordResetTokenHash = null
+  user.passwordResetExpires = null
+  user.refreshTokenHash = null
+  await user.save()
+
+  return user._id.toString()
 }

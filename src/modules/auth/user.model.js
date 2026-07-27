@@ -91,6 +91,17 @@ const userSchema = new Schema(
       default: null,
       select: false,
     },
+    /** SHA-256 du token de reset (jamais le token clair). */
+    passwordResetTokenHash: {
+      type: String,
+      default: null,
+      select: false,
+    },
+    passwordResetExpires: {
+      type: Date,
+      default: null,
+      select: false,
+    },
   },
   { timestamps: true }
 )

@@ -74,3 +74,26 @@ export const changePasswordSchema = z
     message: 'New password must be different from current password',
     path: ['newPassword'],
   })
+
+export const forgotPasswordSchema = z.object({
+  email: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .email('Invalid email address')
+    .max(254, 'Email must be at most 254 characters'),
+})
+
+export const resetPasswordSchema = z
+  .object({
+    token: z
+      .string()
+      .trim()
+      .regex(/^[a-f0-9]{64}$/i, 'Invalid reset token'),
+    newPassword: z.string().min(8, 'Password must be at least 8 characters').max(72),
+    confirmPassword: z.string().min(1, 'Password confirmation is required').max(72),
+  })
+  .refine((data) => data.newPassword === data.confirmPassword, {
+    message: 'Passwords do not match',
+    path: ['confirmPassword'],
+  })

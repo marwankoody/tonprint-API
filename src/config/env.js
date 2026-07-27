@@ -25,12 +25,45 @@ const envSchema = z.object({
   // Contact form → Google Sheets (Apps Script web app URL + shared secret)
   CONTACT_SHEETS_WEBHOOK_URL: z.string().optional().default(''),
   CONTACT_SHEETS_SECRET: z.string().optional().default(''),
+  // Gmail SMTP — emails transactionnels (mot de passe oublié, etc.)
+  // Local: leave GMAIL_APP_PASSWORD empty to log reset links.
+  // Prod: Google App Password required (2FA + https://myaccount.google.com/apppasswords).
+  // FRONTEND_URL must match the app users open from the email.
+  GMAIL_USER: z.string().optional().default('tonprint.officiel@gmail.com'),
+  GMAIL_APP_PASSWORD: z.string().optional().default(''),
+  MAIL_FROM: z
+    .string()
+    .optional()
+    .default('TonPrint <tonprint.officiel@gmail.com>'),
 })
+
+/**
+ * Mot de passe d'application Gmail normalisé (sans espaces).
+ * @param {string} [password]
+ */
+export function normalizeGmailAppPassword(password) {
+  return String(password || '').replace(/\s+/g, '')
+}
+
+/**
+ * True when Gmail SMTP credentials look usable.
+ * @param {{ GMAIL_USER?: string, GMAIL_APP_PASSWORD?: string }} data
+ */
+export function hasGmailSmtpConfig(data) {
+  const user = String(data?.GMAIL_USER || '').trim()
+  const pass = normalizeGmailAppPassword(data?.GMAIL_APP_PASSWORD)
+  return Boolean(user.includes('@') && pass.length >= 16)
+}
 
 const parsed = envSchema
   .refine((data) => data.JWT_ACCESS_SECRET !== data.JWT_REFRESH_SECRET, {
     message: 'JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be different',
     path: ['JWT_REFRESH_SECRET'],
+  })
+  .refine((data) => data.NODE_ENV !== 'production' || hasGmailSmtpConfig(data), {
+    message:
+      'GMAIL_USER and GMAIL_APP_PASSWORD (Google App Password, 16+ chars) are required in production',
+    path: ['GMAIL_APP_PASSWORD'],
   })
   .safeParse(process.env)
 
@@ -43,7 +76,10 @@ if (!parsed.success) {
 }
 
 /** @type {z.infer<typeof envSchema>} */
-export const env = parsed.data
+export const env = {
+  ...parsed.data,
+  GMAIL_APP_PASSWORD: normalizeGmailAppPassword(parsed.data.GMAIL_APP_PASSWORD),
+}
 
 /** Origines CORS autorisées (liste blanche). */
 export const corsOrigins = env.CORS_ORIGINS.split(',')
@@ -59,3 +95,16 @@ export const isCloudinaryConfigured = Boolean(
 export const isContactSheetsConfigured = Boolean(
   env.CONTACT_SHEETS_WEBHOOK_URL && env.CONTACT_SHEETS_SECRET
 )
+
+/** Gmail SMTP prêt si user + app password sont valides. */
+export const isMailConfigured = hasGmailSmtpConfig(env)
+
+if (
+  env.NODE_ENV !== 'production' &&
+  (env.GMAIL_APP_PASSWORD || process.env.GMAIL_APP_PASSWORD) &&
+  !isMailConfigured
+) {
+  console.warn(
+    '[mail] Gmail SMTP incomplete (need GMAIL_USER + App Password ≥ 16 chars) — emails skipped; reset links logged in console'
+  )
+}
