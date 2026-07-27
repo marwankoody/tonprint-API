@@ -18,6 +18,8 @@ export function passwordResetEmail({ name, resetUrl }) {
   const safeName = escapeHtml(displayName)
   const safeUrl = escapeHtml(resetUrl)
   const subject = 'Réinitialisation de votre mot de passe TonPrint'
+
+  // Multipart text : le lien reste nécessaire (clients sans HTML).
   const text = [
     `${displayName},`,
     '',
@@ -52,10 +54,6 @@ export function passwordResetEmail({ name, resetUrl }) {
                   Choisir un nouveau mot de passe
                 </a>
               </p>
-              <p style="margin:0 0 8px;font-size:13px;line-height:1.5;color:#71717a;">
-                Si le bouton ne fonctionne pas, copiez ce lien dans votre navigateur :
-              </p>
-              <p style="margin:0 0 24px;font-size:12px;word-break:break-all;color:#52525b;">${safeUrl}</p>
               <p style="margin:0;font-size:13px;line-height:1.5;color:#a1a1aa;">
                 Si vous n’êtes pas à l’origine de cette demande, ignorez cet email.
               </p>

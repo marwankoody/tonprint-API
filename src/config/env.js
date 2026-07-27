@@ -41,7 +41,7 @@ const envSchema = z.object({
  * Mot de passe d'application Gmail normalisé (sans espaces).
  * @param {string} [password]
  */
-export function normalizeGmailAppPassword(password) {
+function normalizeGmailAppPassword(password) {
   return String(password || '').replace(/\s+/g, '')
 }
 
@@ -49,7 +49,7 @@ export function normalizeGmailAppPassword(password) {
  * True when Gmail SMTP credentials look usable.
  * @param {{ GMAIL_USER?: string, GMAIL_APP_PASSWORD?: string }} data
  */
-export function hasGmailSmtpConfig(data) {
+function hasGmailSmtpConfig(data) {
   const user = String(data?.GMAIL_USER || '').trim()
   const pass = normalizeGmailAppPassword(data?.GMAIL_APP_PASSWORD)
   return Boolean(user.includes('@') && pass.length >= 16)
@@ -65,6 +65,15 @@ const parsed = envSchema
       'GMAIL_USER and GMAIL_APP_PASSWORD (Google App Password, 16+ chars) are required in production',
     path: ['GMAIL_APP_PASSWORD'],
   })
+  .refine(
+    (data) =>
+      data.NODE_ENV !== 'production' ||
+      !/localhost|127\.0\.0\.1/i.test(data.FRONTEND_URL),
+    {
+      message: 'FRONTEND_URL must be the public site URL in production (not localhost)',
+      path: ['FRONTEND_URL'],
+    }
+  )
   .safeParse(process.env)
 
 if (!parsed.success) {
